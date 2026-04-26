@@ -39,22 +39,13 @@ def parse_parameter_value(value_str: str, param_type: str) -> Any:
     if param_type == "boolean":
         return value_str.lower() in ("true", "t", "yes", "y", "1")
     elif param_type == "integer":
-        try:
-            # Re-raise on bad input so the input loop in get_tool_parameters
-            # can catch it and reprompt.
-            return int(value_str)
-        except ValueError:
-            raise
+        # Bare conversions: ValueError / JSONDecodeError propagate to the
+        # input loop in get_tool_parameters, which reprompts.
+        return int(value_str)
     elif param_type == "number":
-        try:
-            return float(value_str)
-        except ValueError:
-            raise
+        return float(value_str)
     elif param_type in ("object", "array"):
-        try:
-            return json.loads(value_str)
-        except json.JSONDecodeError:
-            raise
+        return json.loads(value_str)
     else:  # string (or any unknown type — pass through verbatim)
         return value_str
 

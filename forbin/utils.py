@@ -29,7 +29,6 @@ class FilteredStderr:
             "_handle_post_request",
         ]
         self.suppressing = False
-        self.buffer = ""
         # When suppressing, swallow up to this many follow-up lines unless
         # we hit a blank line first (which signals end-of-traceback).
         self.suppress_depth = 0
@@ -59,9 +58,7 @@ class FilteredStderr:
 
             return
 
-        # If not suppressing, write to original stderr
-        if not self.suppressing:
-            self.original_stderr.write(text)
+        self.original_stderr.write(text)
 
     def flush(self):
         self.original_stderr.flush()
