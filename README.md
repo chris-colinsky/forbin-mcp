@@ -50,27 +50,58 @@ An interactive CLI tool for testing remote MCP (Model Context Protocol) servers 
 
 ## Installation
 
-### Prerequisites
+**Requirements:** Python 3.13 or higher (handled automatically when installing with Homebrew).
 
-- Python 3.13 or higher
-- `uv` package manager (or pip)
+### End-User Installation
 
-### Install with uv
+#### Homebrew (macOS — recommended)
 
 ```bash
-# Clone the repository
+brew tap chris-colinsky/forbin
+brew install forbin
+```
+
+Prebuilt bottles are published for Apple Silicon (Sequoia, Tahoe). On other platforms, Homebrew falls back to building from source.
+
+#### pipx (cross-platform)
+
+[pipx](https://pipx.pypa.io/) installs Python applications in isolated environments:
+
+```bash
+pipx install forbin-mcp
+```
+
+#### pip
+
+```bash
+pip install forbin-mcp
+```
+
+After any of the above:
+
+```bash
+forbin --help
+```
+
+For upgrade, uninstall, and platform-specific notes (including Windows/WSL), see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+### Developer Installation
+
+Clone and install in editable mode using [uv](https://github.com/astral-sh/uv):
+
+```bash
 git clone https://github.com/chris-colinsky/Forbin.git
 cd Forbin
-
-# Install dependencies
 uv sync
 ```
 
-### Install with pip
+Then run from source:
 
 ```bash
-pip install -e .
+uv run forbin
 ```
+
+For dev dependencies, testing, linting, and pre-commit hooks, see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Development](#development) section below.
 
 ## Configuration
 
