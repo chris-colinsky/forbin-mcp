@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import time
 
@@ -8,6 +9,7 @@ from . import config
 from .config import (
     validate_config,
     is_first_run,
+    is_env_shadowed,
     run_first_time_setup,
     reload_config,
     load_config,
@@ -37,6 +39,8 @@ def _toggle_verbose():
     cfg = load_config()
     cfg["VERBOSE"] = str(config.VERBOSE).lower()
     save_config(cfg)
+    # Drop any env-var shadow so the new value sticks for the rest of this session.
+    os.environ.pop("VERBOSE", None)
     status = "[bold green]ON[/bold green]" if config.VERBOSE else "[bold red]OFF[/bold red]"
     console.print(f"\n[bold cyan]Verbose logging toggled {status}[/bold cyan]\n")
 
@@ -53,19 +57,38 @@ def handle_config_command():
         )
         verbose_display = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
 
+        def _env_tag(key: str) -> str:
+            return " [yellow](env)[/yellow]" if is_env_shadowed(key) else ""
+
+        any_shadowed = any(
+            is_env_shadowed(k) for k in ("MCP_SERVER_URL", "MCP_TOKEN", "MCP_HEALTH_URL", "VERBOSE")
+        )
+
         console.print()
         console.print("[bold underline]Configuration[/bold underline]")
         console.print()
         console.print(
-            f"  [bold cyan]1.[/bold cyan] MCP_SERVER_URL:  {config.MCP_SERVER_URL or '[dim]Not set[/dim]'}"
+            f"  [bold cyan]1.[/bold cyan] MCP_SERVER_URL:  "
+            f"{config.MCP_SERVER_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_SERVER_URL')}"
         )
-        console.print(f"  [bold cyan]2.[/bold cyan] MCP_TOKEN:       {token_display}")
         console.print(
-            f"  [bold cyan]3.[/bold cyan] MCP_HEALTH_URL:  {config.MCP_HEALTH_URL or '[dim]Not set[/dim]'}"
+            f"  [bold cyan]2.[/bold cyan] MCP_HEALTH_URL:  "
+            f"{config.MCP_HEALTH_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_HEALTH_URL')} "
+            f"[dim](optional — enables wake-up for suspended servers)[/dim]"
         )
-        console.print(f"  [bold cyan]4.[/bold cyan] VERBOSE:         {verbose_display}")
+        console.print(
+            f"  [bold cyan]3.[/bold cyan] MCP_TOKEN:       {token_display}{_env_tag('MCP_TOKEN')}"
+        )
+        console.print(
+            f"  [bold cyan]4.[/bold cyan] VERBOSE:         {verbose_display}{_env_tag('VERBOSE')}"
+        )
         console.print()
         console.print(f"  [dim]Config file: {CONFIG_FILE}[/dim]")
+        if any_shadowed:
+            console.print(
+                "  [dim][yellow](env)[/yellow] = overridden by environment / .env "
+                "(edits apply this session, but env still wins on next launch)[/dim]"
+            )
         console.print()
 
         choice = Prompt.ask("Edit setting (1-4) or press Enter to go back").strip()
@@ -78,8 +101,8 @@ def handle_config_command():
 
         keys = {
             "1": ("MCP_SERVER_URL", "MCP Server URL"),
-            "2": ("MCP_TOKEN", "MCP Token"),
-            "3": ("MCP_HEALTH_URL", "Health Check URL"),
+            "2": ("MCP_HEALTH_URL", "Health Check URL"),
+            "3": ("MCP_TOKEN", "MCP Token"),
         }
 
         if choice not in keys:
@@ -107,11 +130,63 @@ def handle_config_command():
             cfg[key] = new_value
 
         if save_config(cfg):
+            # Drop any env-var shadow so the just-saved value applies this session.
+            # The .env file (if any) still wins on next launch.
+            os.environ.pop(key, None)
             reload_config()
             console.print(f"[green]  Updated {key}.[/green]")
             changed = True
         else:
             console.print("[red]  Failed to save setting.[/red]")
+
+
+def confirm_or_edit_config() -> bool:
+    """Show current config and prompt to connect, edit, or quit.
+
+    If required fields are missing, only edit/quit are allowed.
+    Returns True to proceed with connection, False to quit.
+    """
+    while True:
+        display_config_panel(config.MCP_SERVER_URL, config.MCP_HEALTH_URL)
+
+        if not validate_config():
+            console.print("[yellow]MCP_SERVER_URL and MCP_TOKEN are required to connect.[/yellow]")
+            choice = (
+                Prompt.ask(
+                    "Press [bold cyan]Enter[/bold cyan] / [bold cyan]c[/bold cyan] to edit, "
+                    "[bold cyan]q[/bold cyan] to quit"
+                )
+                .strip()
+                .lower()
+            )
+            if choice in ("", "c"):
+                handle_config_command()
+                continue
+            if choice in ("q", "quit", "exit"):
+                console.print("\n[bold yellow]Exiting...[/bold yellow]")
+                return False
+            console.print("[red]Invalid choice.[/red]")
+            continue
+
+        choice = (
+            Prompt.ask(
+                "Press [bold cyan]Enter[/bold cyan] to connect, "
+                "[bold cyan]c[/bold cyan] to change configuration, "
+                "[bold cyan]q[/bold cyan] to quit"
+            )
+            .strip()
+            .lower()
+        )
+
+        if choice in ("", "y", "yes"):
+            return True
+        if choice in ("q", "quit", "exit"):
+            console.print("\n[bold yellow]Exiting...[/bold yellow]")
+            return False
+        if choice == "c":
+            handle_config_command()
+            continue
+        console.print("[red]Invalid choice.[/red]")
 
 
 async def reconnect(old_session):
@@ -178,7 +253,10 @@ async def test_connectivity():
     mcp_session = None
     try:
         display_logo()
-        display_config_panel(config.MCP_SERVER_URL, config.MCP_HEALTH_URL)
+        if is_first_run():
+            run_first_time_setup()
+        if not confirm_or_edit_config():
+            return
         overall_start = time.monotonic()
 
         # Determine total steps
@@ -254,21 +332,14 @@ async def interactive_session():
         # Display logo first
         display_logo()
 
-        # Check config, run wizard if needed
-        if not validate_config():
-            if is_first_run():
-                run_first_time_setup()
-            else:
-                console.print("[bold red]Configuration incomplete.[/bold red]")
-                console.print("MCP_SERVER_URL and MCP_TOKEN are required.")
-                console.print(f"[dim]Run 'forbin --config' to set up, or edit {CONFIG_FILE}[/dim]")
-                console.print()
-                return
+        # First run: kick off the setup wizard so the user has somewhere to start.
+        if is_first_run():
+            run_first_time_setup()
 
-            # Re-check after wizard
-            if not validate_config():
-                console.print("[bold red]Configuration still incomplete. Exiting.[/bold red]")
-                return
+        # Always show the config gate so the user can confirm or edit before connecting.
+        # The gate blocks "connect" when required fields are missing.
+        if not confirm_or_edit_config():
+            return
 
         # Initial connection
         mcp_session, tools = await reconnect(None)

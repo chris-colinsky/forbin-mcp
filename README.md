@@ -120,7 +120,8 @@ MCP_SERVER_URL=https://your-server.fly.dev/mcp
 # Required: Authentication token
 MCP_TOKEN=your-secret-token
 
-# Optional: Health check endpoint for suspended services
+# Optional: Health check endpoint for suspended services.
+# Leave unset (or remove) to skip the wake-up step entirely.
 MCP_HEALTH_URL=https://your-server.fly.dev/health
 ```
 
@@ -150,10 +151,11 @@ forbin
 ```
 
 This will:
-1. Wake up your server (if health URL is configured)
-2. Connect to the MCP server
-3. List all available tools
-4. Enter the two-level interactive browser
+1. Show the current configuration and let you confirm or edit it before connecting
+2. Wake up your server (only if `MCP_HEALTH_URL` is configured — otherwise this step is skipped)
+3. Connect to the MCP server
+4. List all available tools
+5. Enter the two-level interactive browser
 
 **Tool List View:**
 ```

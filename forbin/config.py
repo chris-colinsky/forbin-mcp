@@ -67,6 +67,11 @@ def get_setting(key: str, default: str = "") -> str:
     return default
 
 
+def is_env_shadowed(key: str) -> bool:
+    """Return True if an environment variable is overriding the stored config value for `key`."""
+    return bool(os.getenv(key))
+
+
 def is_first_run() -> bool:
     """Check if this is the first time Forbin is being run."""
     return not CONFIG_FILE.exists()
