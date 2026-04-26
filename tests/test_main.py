@@ -268,6 +268,12 @@ class TestCallTool:
 class TestFilteredStderr:
     """Test stderr filtering."""
 
+    @pytest.fixture(autouse=True)
+    def _disable_verbose(self, monkeypatch):
+        # FilteredStderr is a no-op when VERBOSE is True; force it off so the
+        # filter logic actually runs regardless of the user's local config file.
+        monkeypatch.setattr(forbin.config, "VERBOSE", False)
+
     def test_filter_suppressed_pattern(self):
         """Test that suppressed patterns are filtered."""
         original_stderr = StringIO()
@@ -322,6 +328,7 @@ class TestMainFunction:
             patch("forbin.config.MCP_SERVER_URL", "http://test.local/mcp"),
             patch("forbin.config.MCP_TOKEN", "test-token"),
             patch("forbin.config.MCP_HEALTH_URL", "http://test.local/health"),
+            patch("forbin.cli.confirm_or_edit_config", return_value=True),
             patch("httpx.AsyncClient", return_value=mock_httpx_client),
             patch("forbin.client.Client", return_value=mock_mcp_client),
             patch("asyncio.sleep", new_callable=AsyncMock),
