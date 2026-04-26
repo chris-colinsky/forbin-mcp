@@ -129,7 +129,6 @@ This is critical for Fly.io and similar platforms that suspend inactive services
 - **fastmcp** - MCP client library (requires >=2.0.0)
 - **httpx** - Async HTTP for health checks
 - **python-dotenv** - Environment variable management
-- **tenacity** - Retry logic utilities (currently imported but not actively used)
 
 ### Package Management
 

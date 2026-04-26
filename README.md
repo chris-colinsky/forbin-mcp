@@ -263,7 +263,6 @@ forbin/
 - **fastmcp** - MCP client library for Python
 - **httpx** - Async HTTP client for health checks
 - **python-dotenv** - Environment variable management
-- **tenacity** - Retry logic utilities
 
 ### Running Tests
 
