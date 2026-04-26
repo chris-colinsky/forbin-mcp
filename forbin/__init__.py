@@ -1,5 +1,9 @@
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
+# __version__ resolves from installed package metadata (pyproject.toml is the
+# single source of truth — see docs/RELEASING.md). Fallback handles editable
+# checkouts where the package hasn't been installed yet. Defined BEFORE the
+# submodule imports below so display.py can read it via `from . import __version__`.
 try:
     __version__ = _pkg_version("forbin-mcp")
 except PackageNotFoundError:

@@ -35,8 +35,8 @@ from .display import (
 
 def _toggle_verbose():
     """Toggle verbose mode and persist the setting."""
+    # Flip the in-memory flag, then mirror it to the on-disk config.
     config.VERBOSE = not config.VERBOSE
-    # Persist to config file
     cfg = load_config()
     cfg["VERBOSE"] = str(config.VERBOSE).lower()
     save_config(cfg)
@@ -50,7 +50,9 @@ def handle_config_command():
     """Show current config and allow interactive editing. Loops until user exits. Returns True if any setting changed."""
     changed = False
 
+    # Outer loop: re-render the config menu after each edit until the user exits.
     while True:
+        # Mask the token so we never echo a full secret to the terminal.
         token_display = (
             config.MCP_TOKEN[:8] + "..."
             if config.MCP_TOKEN and len(config.MCP_TOKEN) > 8
@@ -58,6 +60,8 @@ def handle_config_command():
         )
         verbose_display = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
 
+        # An (env) tag warns the user that .env / environment is overriding the
+        # stored value — useful because edits won't survive the next launch.
         def _env_tag(key: str) -> str:
             return " [yellow](env)[/yellow]" if is_env_shadowed(key) else ""
 
@@ -103,10 +107,12 @@ def handle_config_command():
         if choice in ("", "b", "back"):
             return changed
 
+        # Field 4 (VERBOSE) is a toggle, not an editable string.
         if choice == "4":
             _toggle_verbose()
             continue
 
+        # Map menu numbers to (env-var key, human label).
         keys = {
             "1": ("MCP_SERVER_URL", "MCP Server URL"),
             "2": ("MCP_HEALTH_URL", "Health Check URL"),
@@ -117,6 +123,7 @@ def handle_config_command():
             console.print("[red]Invalid choice.[/red]")
             continue
 
+        # Inner sub-menu: edit a single field (set / clear / back).
         key, label = keys[choice]
         current = config.get_setting(key) or ""
 
@@ -161,7 +168,7 @@ def handle_config_command():
             os.environ.pop(key, None)
             reload_config()
             console.print(f"[green]  Updated {key}.[/green]")
-            changed = True
+            changed = True  # Caller uses this to decide whether to reconnect.
         else:
             console.print("[red]  Failed to save setting.[/red]")
 
@@ -175,6 +182,8 @@ def confirm_or_edit_config() -> bool:
     while True:
         display_config_panel(config.MCP_SERVER_URL, config.MCP_HEALTH_URL)
 
+        # Branch A: required fields missing — restrict the menu to edit-or-quit
+        # so the user can't try to connect with a broken config.
         if not validate_config():
             console.print("[yellow]MCP_SERVER_URL and MCP_TOKEN are required to connect.[/yellow]")
             console.print()
@@ -194,6 +203,7 @@ def confirm_or_edit_config() -> bool:
             console.print("[red]Invalid choice.[/red]")
             continue
 
+        # Branch B: config is valid — offer connect / change / quit.
         display_commands(
             [
                 ("Enter", "Connect"),
@@ -220,13 +230,15 @@ async def reconnect(old_session):
     display_config_panel(config.MCP_SERVER_URL, config.MCP_HEALTH_URL)
     overall_start = time.monotonic()
 
+    # Tear down the existing session first; swallow errors because cleanup is
+    # best-effort and shouldn't block the new connection.
     if old_session:
         try:
             await old_session.cleanup()
         except Exception:
             pass
 
-    # Determine total steps
+    # Skip the wake-up step entirely when no health URL is configured.
     total_steps = 2 if config.MCP_HEALTH_URL else 1
     current_step = 1
 
@@ -273,18 +285,19 @@ async def reconnect(old_session):
 
 async def test_connectivity():
     """Test connectivity to the MCP server."""
-    # Start background listener for 'v' key toggle
+    # Background listener lets the user toggle verbose mode mid-run with 'v'.
     listener_task = asyncio.create_task(listen_for_toggle())
     mcp_session = None
     try:
         display_logo()
+        # First-time setup before the gate so a fresh user has values to confirm.
         if is_first_run():
             run_first_time_setup()
         if not confirm_or_edit_config():
             return
         overall_start = time.monotonic()
 
-        # Determine total steps
+        # Wake-up step is skipped entirely when no health URL is set.
         total_steps = 2 if config.MCP_HEALTH_URL else 1
         current_step = 1
 
@@ -336,25 +349,24 @@ async def test_connectivity():
         console.print()
 
     finally:
-        # Cancel the listener task when exiting
+        # Always cancel the listener and tear down the session, even on error.
         listener_task.cancel()
         try:
             await listener_task
         except asyncio.CancelledError:
             pass
-        # Clean up MCP session
         if mcp_session:
             await mcp_session.cleanup()
 
 
 async def interactive_session():
     """Run an interactive session to explore and test MCP tools."""
-    # Start background listener for 'v' key toggle during setup
+    # Listener handles 'v' for verbose toggle during the setup phase only;
+    # the main loop below takes over input handling once we're connected.
     listener_task = asyncio.create_task(listen_for_toggle())
     mcp_session = None
 
     try:
-        # Display logo first
         display_logo()
 
         # First run: kick off the setup wizard so the user has somewhere to start.
@@ -366,7 +378,7 @@ async def interactive_session():
         if not confirm_or_edit_config():
             return
 
-        # Initial connection
+        # Initial connection (no prior session to clean up).
         mcp_session, tools = await reconnect(None)
 
         if not mcp_session:
@@ -376,15 +388,16 @@ async def interactive_session():
             console.print("[yellow]No tools available on this server.[/yellow]")
             return
 
-        # Stop background listener before entering interactive loop
-        # The interactive loop handles 'v' key itself
+        # Hand off keyboard input to the interactive loop below — it has its
+        # own 'v' shortcut and shouldn't compete with the background listener.
         listener_task.cancel()
         try:
             await listener_task
         except asyncio.CancelledError:
             pass
 
-        # Main interaction loop - Tool List View
+        # Main interaction loop — Tool List View. `running` is the outer escape
+        # hatch so a quit from the inner Tool View also exits the outer loop.
         running = True
         while running:
             display_tools(tools)
@@ -410,6 +423,8 @@ async def interactive_session():
                 continue
 
             if choice == "c":
+                # Only force a reconnect if something actually changed —
+                # otherwise we'd disconnect for nothing.
                 changed = handle_config_command()
                 if changed:
                     new_session, new_tools = await reconnect(mcp_session)
@@ -422,13 +437,13 @@ async def interactive_session():
                         )
                 continue
 
-            # Try to parse as tool number
+            # Anything else: treat as a 1-indexed tool selection.
             try:
                 tool_num = int(choice)
                 if 1 <= tool_num <= len(tools):
                     selected_tool = tools[tool_num - 1]
 
-                    # Enter Tool View loop
+                    # Inner Tool View loop — details / run / back / quit.
                     while True:
                         display_tool_header(selected_tool)
                         display_tool_menu()
@@ -468,7 +483,9 @@ async def interactive_session():
                                     console.print(
                                         "[yellow]Reconnection failed. Keeping current connection.[/yellow]\n"
                                     )
-                                break  # Back to tool list since tools may have changed
+                                # Drop back to the tool list — the tool set
+                                # may have changed under the new connection.
+                                break
 
                         else:
                             console.print(
@@ -482,7 +499,8 @@ async def interactive_session():
                 console.print("[red]Invalid choice. Enter a tool number or 'q' to quit.[/red]\n")
 
     finally:
-        # Ensure listener is cancelled if we exit early
+        # The listener may already be cancelled (we cancel it after setup);
+        # only cancel again if we exited the try block before that point.
         if not listener_task.done():
             listener_task.cancel()
             try:
@@ -490,17 +508,18 @@ async def interactive_session():
             except asyncio.CancelledError:
                 pass
 
-        # Clean up MCP session
         if mcp_session:
             await mcp_session.cleanup()
 
 
 async def async_main():
     """Async main entry point."""
+    # Install the stderr filter and verbose-aware logging handlers once,
+    # before any subcommand can produce output.
     setup_logging()
 
     try:
-        # Check for command line arguments
+        # Subcommand dispatch: --test, --config, --help, or fall through to interactive.
         if len(sys.argv) > 1:
             if sys.argv[1] in ("--test", "-t"):
                 await test_connectivity()

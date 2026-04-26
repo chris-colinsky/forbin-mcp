@@ -14,6 +14,9 @@ console = Console(width=100)
 
 def display_logo():
     """Display the Forbin ASCII logo."""
+    # Lazy import: __version__ is set in forbin/__init__.py at import time, but
+    # importing it at module top would create a partial-import risk during the
+    # parent package's own initialisation chain.
     from . import __version__
 
     logo = f"""
@@ -79,7 +82,8 @@ def display_step(
     step_text = f"[{color}]{icon} Step {step_num}/{total_steps}:[/{color}] [bold {color}]{title}[/bold {color}]"
 
     if update:
-        # Move cursor up one line and clear it, then print the updated status
+        # In-place update: rewind one line and clear it, so a "Step 1: ✓"
+        # success replaces the earlier "Step 1: ⏳ in progress" line.
         console.control(Control((ControlType.CURSOR_UP, 1), (ControlType.ERASE_IN_LINE, 2)))
         console.print(step_text)
     else:
@@ -102,7 +106,7 @@ def display_tools(tools: List[Any]):
 
     for i, tool in enumerate(tools, 1):
         description = tool.description.strip() if tool.description else "No description"
-        # Truncate long descriptions for compact display
+        # Truncate to keep each tool on a single 100-col line.
         if len(description) > 60:
             description = description[:57] + "..."
         console.print(
@@ -156,8 +160,11 @@ def _highlight_json_in_text(text: str):
     # Add remaining text
     if current_pos < len(text):
         remaining = text[current_pos:]
-        # Highlight other JSON syntax
-        remaining = remaining.replace("{", "{\u200b")  # Add zero-width space for splitting
+        # Trick: insert a zero-width space after each JSON delimiter so we
+        # can split on it and style each piece. The U+200B is invisible to
+        # the user but gives us a unique split character that won't collide
+        # with anything in the JSON itself.
+        remaining = remaining.replace("{", "{\u200b")
         remaining = remaining.replace("}", "}\u200b")
         remaining = remaining.replace("[", "[\u200b")
         remaining = remaining.replace("]", "]\u200b")
@@ -189,6 +196,7 @@ def display_commands(items: List[tuple]):
         key_label for the Enter key (it will be rendered as [Enter]).
     """
     console.print("[bold underline]Commands:[/bold underline]")
+    # Pad each key to the widest label so all the descriptions line up vertically.
     max_visible = max(len(f"[{k}]") for k, _ in items)
     for key, desc in items:
         pad = " " * (max_visible - len(f"[{key}]"))

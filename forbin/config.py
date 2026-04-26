@@ -5,10 +5,11 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load .env from cwd (or up the tree) before reading any settings — so
+# environment shadowing of the JSON config behaves predictably.
 load_dotenv()
 
-# File Paths
+# File Paths — both overridable via env so tests and CI can sandbox them.
 FORBIN_DIR = Path(os.getenv("FORBIN_DIR", str(Path.home() / ".forbin")))
 CONFIG_FILE = Path(os.getenv("FORBIN_CONFIG_FILE", str(FORBIN_DIR / "config.json")))
 
@@ -53,22 +54,23 @@ def save_config(config: dict) -> bool:
 
 def get_setting(key: str, default: str = "") -> str:
     """Get setting with priority: Env Var > Config File > Default."""
-    # 1. Environment Variable
+    # Precedence is intentional: env wins so .env / shell can override the
+    # persisted JSON without editing it. The CLI surfaces this with an (env) tag.
     env_val = os.getenv(key)
     if env_val:
         return env_val
 
-    # 2. Config File
     config = load_config()
     if key in config:
         return str(config[key])
 
-    # 3. Default
     return default
 
 
 def is_env_shadowed(key: str) -> bool:
     """Return True if an environment variable is overriding the stored config value for `key`."""
+    # Drives the (env) tag in the config editor — warns the user that their
+    # edit will be invisible until the env var is unset.
     return bool(os.getenv(key))
 
 
@@ -88,6 +90,8 @@ def validate_config() -> bool:
 
 def reload_config():
     """Reload module-level config variables from settings."""
+    # Called after the user edits config in the CLI so the change applies
+    # to the rest of the session without restarting the process.
     global MCP_SERVER_URL, MCP_TOKEN, MCP_HEALTH_URL, VERBOSE
     MCP_SERVER_URL = get_setting("MCP_SERVER_URL")
     MCP_TOKEN = get_setting("MCP_TOKEN")
@@ -152,7 +156,8 @@ def run_first_time_setup():
         console.print()
 
 
-# Initialize Configuration
+# Module-level snapshot of the config — populated at import. reload_config()
+# updates these in-place after the user edits values via the CLI.
 MCP_SERVER_URL: Optional[str] = get_setting("MCP_SERVER_URL") or None
 MCP_HEALTH_URL: Optional[str] = get_setting("MCP_HEALTH_URL") or None
 MCP_TOKEN: Optional[str] = get_setting("MCP_TOKEN") or None
