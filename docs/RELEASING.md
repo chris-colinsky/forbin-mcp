@@ -12,6 +12,11 @@
    version = "0.2.0"
    ```
 
+   `pyproject.toml` is the single source of truth. `forbin.__version__` and the
+   CLI banner read it via `importlib.metadata` at runtime, and
+   `tests/test_version.py` fails CI if anything drifts. Do not hardcode the
+   version anywhere else.
+
 2. **Commit and push** to `main` (or merge a release branch):
    ```bash
    git add pyproject.toml
