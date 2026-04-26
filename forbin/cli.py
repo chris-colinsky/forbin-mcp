@@ -27,6 +27,7 @@ from .display import (
     display_tool_schema,
     display_logo,
     display_config_panel,
+    display_commands,
     display_step,
     console,
 )
@@ -91,8 +92,15 @@ def handle_config_command():
             )
         console.print()
 
-        choice = Prompt.ask("Edit setting (1-4) or press Enter to go back").strip()
-        if not choice:
+        display_commands(
+            [
+                ("number", "Edit field"),
+                ("b", "Back"),
+            ]
+        )
+
+        choice = Prompt.ask("Choice").strip().lower()
+        if choice in ("", "b", "back"):
             return changed
 
         if choice == "4":
@@ -113,21 +121,39 @@ def handle_config_command():
         current = config.get_setting(key) or ""
 
         console.print()
+        console.print(f"[bold]Editing {key}[/bold]")
         if current:
-            display = current[:40] + ("..." if len(current) > 40 else "")
+            display = current[:60] + ("..." if len(current) > 60 else "")
             console.print(f"  [dim]Current: {display}[/dim]")
-        console.print("  [dim]Enter new value, 'clear' to remove, or Enter to keep current[/dim]")
-        new_value = input(f"  {label}: ").strip()
+        else:
+            console.print("  [dim]Current: [italic]not set[/italic][/dim]")
+        console.print()
 
-        if not new_value:
+        sub_commands = [("Enter", "Set a new value")]
+        if current:
+            sub_commands.append(("x", "Clear"))
+        sub_commands.append(("b", "Back"))
+        display_commands(sub_commands)
+
+        action = Prompt.ask("Choice").strip().lower()
+
+        if action in ("b", "back"):
             console.print("[dim]  No change.[/dim]")
             continue
 
-        cfg = load_config()
-        if new_value.lower() == "clear":
+        if action == "":
+            new_value = input(f"  {label}: ").strip()
+            if not new_value:
+                console.print("[dim]  No change.[/dim]")
+                continue
+            cfg = load_config()
+            cfg[key] = new_value
+        elif action == "x" and current:
+            cfg = load_config()
             cfg.pop(key, None)
         else:
-            cfg[key] = new_value
+            console.print("[red]  Invalid choice.[/red]")
+            continue
 
         if save_config(cfg):
             # Drop any env-var shadow so the just-saved value applies this session.
@@ -151,15 +177,15 @@ def confirm_or_edit_config() -> bool:
 
         if not validate_config():
             console.print("[yellow]MCP_SERVER_URL and MCP_TOKEN are required to connect.[/yellow]")
-            choice = (
-                Prompt.ask(
-                    "Press [bold cyan]Enter[/bold cyan] / [bold cyan]c[/bold cyan] to edit, "
-                    "[bold cyan]q[/bold cyan] to quit"
-                )
-                .strip()
-                .lower()
+            console.print()
+            display_commands(
+                [
+                    ("Enter", "Edit configuration"),
+                    ("q", "Quit"),
+                ]
             )
-            if choice in ("", "c"):
+            choice = Prompt.ask("Choice").strip().lower()
+            if choice == "":
                 handle_config_command()
                 continue
             if choice in ("q", "quit", "exit"):
@@ -168,17 +194,16 @@ def confirm_or_edit_config() -> bool:
             console.print("[red]Invalid choice.[/red]")
             continue
 
-        choice = (
-            Prompt.ask(
-                "Press [bold cyan]Enter[/bold cyan] to connect, "
-                "[bold cyan]c[/bold cyan] to change configuration, "
-                "[bold cyan]q[/bold cyan] to quit"
-            )
-            .strip()
-            .lower()
+        display_commands(
+            [
+                ("Enter", "Connect"),
+                ("c", "Change configuration"),
+                ("q", "Quit"),
+            ]
         )
+        choice = Prompt.ask("Choice").strip().lower()
 
-        if choice in ("", "y", "yes"):
+        if choice == "":
             return True
         if choice in ("q", "quit", "exit"):
             console.print("\n[bold yellow]Exiting...[/bold yellow]")
@@ -364,18 +389,17 @@ async def interactive_session():
         while running:
             display_tools(tools)
 
-            console.print("[bold underline]Commands:[/bold underline]")
-            console.print("  [bold cyan]number[/bold cyan] - Select a tool")
-            console.print(
-                "  [bold cyan]v[/bold cyan]      - Toggle verbose logging (current: {})".format(
-                    "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
-                )
+            verbose_state = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
+            display_commands(
+                [
+                    ("number", "Select a tool"),
+                    ("v", f"Toggle verbose logging (currently: {verbose_state})"),
+                    ("c", "Change configuration"),
+                    ("q", "Quit"),
+                ]
             )
-            console.print("  [bold cyan]c[/bold cyan]      - Configuration settings")
-            console.print("  [bold cyan]q[/bold cyan]      - Quit")
-            console.print()
 
-            choice = Prompt.ask("Select tool").strip().lower()
+            choice = Prompt.ask("Choice").strip().lower()
 
             if choice in ("quit", "q", "exit"):
                 console.print("\n[bold yellow]Exiting...[/bold yellow]")
@@ -409,18 +433,18 @@ async def interactive_session():
                         display_tool_header(selected_tool)
                         display_tool_menu()
 
-                        tool_choice = Prompt.ask("Choose option").strip().lower()
+                        tool_choice = Prompt.ask("Choice").strip().lower()
 
-                        if tool_choice in ("d", "details", "1"):
+                        if tool_choice in ("d", "details"):
                             # View details
                             display_tool_schema(selected_tool)
 
-                        elif tool_choice in ("r", "run", "2"):
+                        elif tool_choice in ("r", "run"):
                             # Run tool
                             params = get_tool_parameters(selected_tool)
                             await call_tool(mcp_session, selected_tool, params)
 
-                        elif tool_choice in ("b", "back", "3"):
+                        elif tool_choice in ("b", "back", ""):
                             # Back to tool list
                             break
 

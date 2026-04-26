@@ -179,14 +179,31 @@ def display_tool_header(tool: Any):
     console.print()
 
 
+def display_commands(items: List[tuple]):
+    """Render a uniform 'Commands:' block.
+
+    Args:
+        items: list of (key_label, description) tuples. Use 'Enter' as the
+        key_label for the Enter key (it will be rendered as [Enter]).
+    """
+    console.print("[bold underline]Commands:[/bold underline]")
+    max_visible = max(len(f"[{k}]") for k, _ in items)
+    for key, desc in items:
+        pad = " " * (max_visible - len(f"[{key}]"))
+        console.print(f"  [bold cyan]\\[{key}][/bold cyan]{pad} - {desc}")
+    console.print()
+
+
 def display_tool_menu():
     """Display the tool view menu options."""
-    console.print("[bold underline]Options:[/bold underline]")
-    console.print("  [bold cyan]d[/bold cyan] - View details")
-    console.print("  [bold cyan]r[/bold cyan] - Run tool")
-    console.print("  [bold cyan]b[/bold cyan] - Back to tool list")
-    console.print("  [bold cyan]q[/bold cyan] - Quit")
-    console.print()
+    display_commands(
+        [
+            ("d", "View details"),
+            ("r", "Run tool"),
+            ("b", "Back to tool list"),
+            ("q", "Quit"),
+        ]
+    )
 
 
 def _parse_description_with_code_blocks(description: str) -> List[Any]:
