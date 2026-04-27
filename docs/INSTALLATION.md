@@ -4,6 +4,8 @@ This guide covers all methods for installing Forbin.
 
 **Requirements:** Python 3.13 or higher
 
+> **Note:** Forbin's distribution name on PyPI is `forbin-mcp`, but the import name and CLI command are both `forbin`. Use `forbin-mcp` everywhere you'd write a package name (`pip install`, `pipx install`, `uv tool install`); use `forbin` to run the tool.
+
 ## Homebrew (macOS/Linux - Recommended)
 
 The easiest way to install Forbin on macOS or Linux:
@@ -40,8 +42,8 @@ brew uninstall forbin
 brew install pipx       # macOS/Linux
 # or: pip install pipx  # Any platform
 
-# Install forbin
-pipx install forbin
+# Install forbin (PyPI distribution name is `forbin-mcp`)
+pipx install forbin-mcp
 
 # Verify installation
 forbin --help
@@ -50,13 +52,13 @@ forbin --help
 ### Upgrading
 
 ```bash
-pipx upgrade forbin
+pipx upgrade forbin-mcp
 ```
 
 ### Uninstalling
 
 ```bash
-pipx uninstall forbin
+pipx uninstall forbin-mcp
 ```
 
 ## pip (All Platforms)
@@ -64,8 +66,8 @@ pipx uninstall forbin
 Standard Python package installation:
 
 ```bash
-# Install
-pip install forbin
+# Install (PyPI distribution name is `forbin-mcp`)
+pip install forbin-mcp
 
 # Verify installation
 forbin --help
@@ -74,13 +76,13 @@ forbin --help
 ### Upgrading
 
 ```bash
-pip install --upgrade forbin
+pip install --upgrade forbin-mcp
 ```
 
 ### Uninstalling
 
 ```bash
-pip uninstall forbin
+pip uninstall forbin-mcp
 ```
 
 ## uv (For Developers)
@@ -89,10 +91,10 @@ Using the modern [uv](https://github.com/astral-sh/uv) package manager:
 
 ```bash
 # Install globally
-uv tool install forbin
+uv tool install forbin-mcp
 
 # Or run without installing (ephemeral)
-uvx forbin
+uvx --from forbin-mcp forbin
 
 # Verify installation
 forbin --help
@@ -101,13 +103,13 @@ forbin --help
 ### Upgrading
 
 ```bash
-uv tool upgrade forbin
+uv tool upgrade forbin-mcp
 ```
 
 ### Uninstalling
 
 ```bash
-uv tool uninstall forbin
+uv tool uninstall forbin-mcp
 ```
 
 ## From Source (Development)
@@ -139,6 +141,8 @@ Forbin runs on Windows via [WSL (Windows Subsystem for Linux)](https://learn.mic
 1. Install WSL: `wsl --install`
 2. Open your Linux distribution
 3. Follow the pip or pipx installation instructions above
+
+> **Why WSL?** Forbin's single-key shortcuts (`v` to toggle verbose, `c` for config/clipboard, `ESC` to cancel a running tool) depend on POSIX `termios`/`tty`, which isn't available on native Windows. The CLI itself will install and run on native Windows, but those shortcuts silently no-op there. See [Terminal Compatibility](USAGE.md#terminal-compatibility) for details.
 
 ## Verification
 
@@ -176,10 +180,11 @@ To completely remove Forbin:
 
 ```bash
 # Uninstall (use your installation method)
-pipx uninstall forbin   # or pip, brew, uv tool uninstall, etc.
+pipx uninstall forbin-mcp   # or pip, brew, uv tool uninstall, etc.
 
 # Remove configuration (if created)
 rm .env
+rm -rf ~/.forbin    # persisted JSON config from the first-run wizard
 ```
 
 ## Next Steps

@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Technical Details
 
 - Python 3.13+ required
-- Built with fastmcp, httpx, python-dotenv, and tenacity
+- Built with fastmcp, httpx, python-dotenv, pyperclip, and rich
 - MIT licensed
 
 [1.0.0]: https://github.com/chris-colinsky/Forbin/releases/tag/v1.0.0

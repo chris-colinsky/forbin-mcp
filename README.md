@@ -106,7 +106,11 @@ For dev dependencies, testing, linting, and pre-commit hooks, see [CONTRIBUTING.
 
 ## Configuration
 
-Create a `.env` file in the project root (copy from `.env.example`):
+Forbin reads its settings from environment variables (or a `.env` file) and from `~/.forbin/config.json`. **Environment wins** when both are set. You have two ways to set up:
+
+**Option 1 — First-run wizard (easiest):** just run `forbin`. If no config exists, you'll be prompted for the required values and they'll be saved to `~/.forbin/config.json`. Re-run anytime with `forbin --config`.
+
+**Option 2 — `.env` file (best for CI/CD or scripted setups):**
 
 ```bash
 cp .env.example .env
@@ -121,10 +125,13 @@ MCP_SERVER_URL=https://your-server.fly.dev/mcp
 # Required: Authentication token
 MCP_TOKEN=your-secret-token
 
-# Optional: Health check endpoint for suspended services.
+# Optional: Health check endpoint. Forbin uses this to verify availability
+# (like an LLM provider's /models) and to wake up suspended services.
 # Leave unset (or remove) to skip the wake-up step entirely.
 MCP_HEALTH_URL=https://your-server.fly.dev/health
 ```
+
+For full details on configuration precedence, the JSON config file, and platform-specific examples, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ### Configuration Examples
 
@@ -210,6 +217,14 @@ This is useful for:
 - Validating authentication tokens
 - CI/CD health checks
 
+### Config Wizard
+
+Re-run the first-time setup wizard at any time:
+
+```bash
+forbin --config
+```
+
 ### Help
 
 ```bash
@@ -219,6 +234,15 @@ forbin --help
 ## How It Works
 
 Forbin is designed to handle the complexities of remote MCP servers, especially those on serverless or suspended platforms.
+
+### Health Endpoint Strategy
+
+When `MCP_HEALTH_URL` is configured, Forbin probes the health endpoint before opening the MCP connection. The probe does two things at once:
+
+- **Availability check** — confirms the server is reachable, similar to hitting an LLM provider's `/models` endpoint to verify the API is up before issuing real requests.
+- **Wake-up trigger** — on platforms that suspend or stop idle instances (Fly.io scale-to-zero, Railway, Render, etc.), the same request rouses the service.
+
+If you don't configure a health URL, Forbin skips the probe and connects directly — the right choice for always-on servers and local development.
 
 ### Step Output Colors
 
@@ -232,6 +256,19 @@ During operation, Forbin shows its progress using colored step indicators:
 
 At any time during the connection process or while in the tool menu, you can press **`v`** to toggle verbose logging on or off. This is useful for debugging connection issues in real-time without restarting the tool.
 
+### Cancelling a Running Tool
+
+While a tool call is in flight, press **`ESC`** to cancel it. You stay in the tool view instead of having to ctrl-C the whole CLI — handy for tools that hang or take longer than you're willing to wait.
+
+### Terminal Compatibility
+
+Forbin's single-key shortcuts (`v`, `c`, `ESC`-to-cancel, post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. That has a few practical implications:
+
+- **macOS and Linux** — fully supported in any modern terminal (Terminal.app, iTerm2, Alacritty, GNOME Terminal, Konsole, etc.).
+- **Native Windows** — `termios` isn't available, so the single-key shortcuts silently no-op. Numbered tool selection, prompts, and tool execution still work, but you won't be able to toggle verbose mid-run, cancel a hanging tool with `ESC`, or use the one-key clipboard prompt. **Run Forbin under [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)** for the full experience.
+- **Piped or non-TTY stdin** (e.g. `forbin < script.txt`, some CI runners) — the shortcuts and the post-call clipboard prompt are skipped automatically. `forbin --test` is the right mode for non-interactive contexts.
+- **Linux clipboard copy** — the `c` shortcut after a tool call requires `xclip` or `xsel` to be installed (`pyperclip` uses them as backends). Without one, Forbin tells you it couldn't access the clipboard and continues.
+
 ### Detailed Documentation
 
 For a deep dive into the wake-up process, connection retry logic, and technical architecture, see [DOCS.md](DOCS.md).
@@ -244,13 +281,14 @@ For a deep dive into the wake-up process, connection retry logic, and technical 
 forbin/
  forbin/              # Package directory
    __init__.py
-   __main__.py
+   __main__.py        # python -m forbin entry point
    cli.py             # Main CLI application
-   client.py          # MCP connection logic
-   config.py          # Configuration
-   display.py         # UI logic
-   tools.py           # Tool handling
-   utils.py           # Utilities
+   client.py          # MCP connection + wake-up
+   config.py          # Configuration + first-run wizard
+   display.py         # Rich-based UI primitives
+   tools.py           # Parameter parsing + tool calls
+   utils.py           # FilteredStderr + key listeners
+   verbose.py         # vlog helpers (gated on VERBOSE flag)
  pyproject.toml       # Python project configuration
  uv.lock              # Dependency lock file
  .env.example         # Example environment configuration
@@ -264,6 +302,8 @@ forbin/
 - **fastmcp** - MCP client library for Python
 - **httpx** - Async HTTP client for health checks
 - **python-dotenv** - Environment variable management
+- **pyperclip** - Clipboard copy for tool responses
+- **rich** - Terminal UI rendering
 
 ### Running Tests
 
@@ -328,7 +368,7 @@ def health():
 
 ## Development
 
-For detailed development instructions, testing, and automation, see [DEVELOPMENT.md](DEVELOPMENT.md).
+For detailed development instructions, testing, and automation, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 **Quick commands:**
 
@@ -358,7 +398,7 @@ Automatically run checks before each commit:
 make pre-commit-install
 ```
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for complete details on testing, CI/CD, and contributing.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for complete details on testing, CI/CD, and contributing.
 
 ## Contributing
 
