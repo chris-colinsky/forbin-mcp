@@ -541,7 +541,9 @@ async def async_main():
                 console.print("  Priority: .env / environment > ~/.forbin/config.json")
                 console.print("\n[bold]Interactive Shortcuts:[/bold]")
                 console.print("  [bold cyan]'v'[/bold cyan]   - Toggle verbose logging at any time")
-                console.print("  [bold cyan]'c'[/bold cyan]   - View/update configuration")
+                console.print(
+                    "  [bold cyan]'c'[/bold cyan]   - View/update configuration (in menu) or copy last response (after a tool call)"
+                )
                 console.print("  [bold cyan]ESC[/bold cyan]   - Cancel a running tool call")
                 return
 

@@ -265,6 +265,77 @@ class TestCallTool:
         assert "Tool execution failed" in captured.out
 
 
+class TestClipboard:
+    """Test clipboard copy helpers and the post-result prompt branch."""
+
+    def test_copy_to_clipboard_success(self):
+        with patch("pyperclip.copy") as mock_copy:
+            assert forbin.utils.copy_to_clipboard("hello") is True
+            mock_copy.assert_called_once_with("hello")
+
+    def test_copy_to_clipboard_failure(self):
+        with patch("pyperclip.copy", side_effect=RuntimeError("no backend")):
+            assert forbin.utils.copy_to_clipboard("hello") is False
+
+    @pytest.mark.asyncio
+    async def test_call_tool_copies_on_c(self, mock_mcp_client, mock_tool, capsys):
+        # Swap in a JSON response so we can also assert the copied text is
+        # the formatted JSON the user just saw rather than the raw string.
+        mock_result = Mock()
+        content = Mock()
+        content.text = '{"answer":42}'
+        mock_result.content = [content]
+        mock_mcp_client.call_tool = AsyncMock(return_value=mock_result)
+
+        with (
+            patch("forbin.tools.read_single_key", return_value="c"),
+            patch("forbin.tools.copy_to_clipboard", return_value=True) as mock_copy,
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        captured = capsys.readouterr()
+        assert "Copied to clipboard" in captured.out
+        mock_copy.assert_called_once()
+        copied_text = mock_copy.call_args[0][0]
+        # Formatted JSON has indentation, which the raw response does not.
+        assert '"answer": 42' in copied_text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_skips_on_other_key(self, mock_mcp_client, mock_tool, capsys):
+        with (
+            patch("forbin.tools.read_single_key", return_value=""),
+            patch("forbin.tools.copy_to_clipboard") as mock_copy,
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        mock_copy.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Copied to clipboard" not in captured.out
+
+    @pytest.mark.asyncio
+    async def test_call_tool_skips_on_non_tty(self, mock_mcp_client, mock_tool, capsys):
+        # read_single_key returns None when stdin isn't a TTY — the prompt
+        # branch must early-out without invoking the clipboard.
+        with (
+            patch("forbin.tools.read_single_key", return_value=None),
+            patch("forbin.tools.copy_to_clipboard") as mock_copy,
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        mock_copy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_call_tool_copy_failure_message(self, mock_mcp_client, mock_tool, capsys):
+        with (
+            patch("forbin.tools.read_single_key", return_value="c"),
+            patch("forbin.tools.copy_to_clipboard", return_value=False),
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        captured = capsys.readouterr()
+        assert "Could not access clipboard" in captured.out
+
+
 class TestFilteredStderr:
     """Test stderr filtering."""
 

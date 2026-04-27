@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 from .display import console
+from .utils import copy_to_clipboard, read_single_key
 from .verbose import vlog_json, vlog_timing
 
 if TYPE_CHECKING:
@@ -211,7 +212,11 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
         console.rule("[bold green]RESULT[/bold green]")
         console.print()
 
-        # Extract and display result
+        # Extract and display result. We accumulate `copyable_blocks` in
+        # parallel with rendering so the post-result clipboard prompt has
+        # access to the exact text the user just saw — including the
+        # JSON-formatted version when parsing succeeded.
+        copyable_blocks: list[str] = []
         if result.content:
             for item in result.content:
                 text = getattr(item, "text", None)
@@ -232,6 +237,7 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
                                     title_align="left",
                                 )
                             )
+                            copyable_blocks.append(formatted)
                             continue
                         except json.JSONDecodeError:
                             pass
@@ -245,8 +251,11 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
                             title_align="left",
                         )
                     )
+                    copyable_blocks.append(text.strip())
                 else:
-                    console.print(str(item))
+                    rendered = str(item)
+                    console.print(rendered)
+                    copyable_blocks.append(rendered)
         else:
             console.print("[dim]No content returned[/dim]")
 
@@ -254,6 +263,32 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
         console.rule()
         console.print()
 
+        if copyable_blocks:
+            _prompt_copy_to_clipboard("\n\n".join(copyable_blocks))
+
     except Exception as e:
         console.print(f"[bold red]Tool execution failed:[/bold red] {type(e).__name__}")
         console.print(f"   Error: {e}\n")
+
+
+def _prompt_copy_to_clipboard(text: str) -> None:
+    """Offer a single-key 'c' shortcut to copy `text` to the clipboard.
+    No-op when stdin isn't a TTY (read_single_key returns None there)."""
+    console.print(
+        "[dim]Press [bold cyan]c[/bold cyan] to copy response to clipboard, "
+        "any other key to continue...[/dim]"
+    )
+    key = read_single_key()
+    if key is None:
+        return
+    # Echo a newline so subsequent menu output starts on a fresh line —
+    # the keystroke itself isn't echoed in cbreak mode.
+    console.print()
+    if key == "c":
+        if copy_to_clipboard(text):
+            console.print("[green]+ Copied to clipboard[/green]\n")
+        else:
+            console.print(
+                "[yellow]- Could not access clipboard "
+                "(install xclip/xsel on Linux, or check pyperclip docs)[/yellow]\n"
+            )

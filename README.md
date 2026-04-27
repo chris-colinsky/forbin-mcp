@@ -39,6 +39,7 @@ An interactive CLI tool for testing remote MCP (Model Context Protocol) servers 
 - **Generic Tool Calling** - Test any MCP tool with interactive parameter input
 - **Type-Safe Parameter Parsing** - Automatic conversion of strings, booleans, numbers, and JSON objects
 - **Connectivity Testing** - Verify server connectivity without running tools
+- **Clipboard Copy** - Press `c` after any tool response to copy it to the system clipboard
 
 ## Use Cases
 

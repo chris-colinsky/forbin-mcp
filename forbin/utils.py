@@ -124,6 +124,49 @@ def setup_logging():
     mcp_logger.setLevel(logging.DEBUG)
 
 
+def read_single_key() -> str | None:
+    """
+    Block until the user presses one key, then return it lowercased.
+    Returns None when stdin isn't a TTY (e.g. pytest capture, piped input)
+    or when termios/tty aren't importable (Windows) — callers treat this as
+    "skip the prompt" rather than a hard failure.
+    """
+    try:
+        import termios
+        import tty
+    except ImportError:
+        return None
+
+    try:
+        fd = sys.stdin.fileno()
+    except (AttributeError, OSError):
+        return None
+    if not sys.stdin.isatty():
+        return None
+
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        char = sys.stdin.read(1)
+        return char.lower()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text to the system clipboard. Returns False if the platform
+    backend isn't available (e.g. headless Linux without xclip/xsel)."""
+    try:
+        # Lazy import: a missing native backend on the user's machine should
+        # only break the copy path, not forbin's overall importability.
+        import pyperclip
+
+        pyperclip.copy(text)
+        return True
+    except Exception:
+        return False
+
+
 async def listen_for_toggle():
     """
     Background task to listen for 'v' key to toggle verbose logging.
