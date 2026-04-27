@@ -34,10 +34,10 @@ Thank you for your interest in contributing to Forbin! This document provides gu
 3. **Test your changes**:
    ```bash
    # Test connectivity
-   python forbin.py --test
+   uv run forbin --test
 
    # Test interactive mode
-   python forbin.py
+   uv run forbin
    ```
 
 4. **Commit your changes**:
@@ -55,15 +55,15 @@ Thank you for your interest in contributing to Forbin! This document provides gu
 
 ## Code Style Guidelines
 
-- **Python version**: Target Python 3.11+
+- **Python version**: Target Python 3.13+
 - **Line length**: 100 characters (configured in `pyproject.toml`)
 - **Formatting**: We use Black for code formatting
   ```bash
-  black forbin.py
+  make format
   ```
 - **Linting**: We use Ruff for linting
   ```bash
-  ruff check forbin.py
+  make lint
   ```
 - **Type hints**: Use type hints where appropriate
 - **Docstrings**: Use docstrings for functions, following Google style

@@ -1,5 +1,5 @@
 import json
-from typing import List, Any, Optional
+from typing import List, Any
 from rich.console import Console, Group
 from rich.table import Table
 from rich.panel import Panel
@@ -14,7 +14,12 @@ console = Console(width=100)
 
 def display_logo():
     """Display the Forbin ASCII logo."""
-    logo = """
+    # Lazy import: __version__ is set in forbin/__init__.py at import time, but
+    # importing it at module top would create a partial-import risk during the
+    # parent package's own initialisation chain.
+    from . import __version__
+
+    logo = f"""
 [bold cyan]
   ███████╗ ██████╗ ██████╗ ██████╗ ██╗███╗   ██╗
   ██╔════╝██╔═══██╗██╔══██╗██╔══██╗██║████╗  ██║
@@ -22,25 +27,40 @@ def display_logo():
   ██╔══╝  ██║   ██║██╔══██╗██╔══██╗██║██║╚██╗██║
   ██║     ╚██████╔╝██║  ██║██████╔╝██║██║ ╚████║
   ╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝  ╚═══╝[/bold cyan]
-[dim]         MCP Remote Tool Tester v1.0.0[/dim]
+[dim]         MCP Remote Tool Tester v{__version__}[/dim]
 [italic dim]    "This is the voice of world control..."[/italic dim]
 """
     console.print(logo)
 
 
-def display_config_panel(server_url: Optional[str], health_url: Optional[str] = None):
-    """Display configuration information in a panel."""
+def display_config_panel():
+    """Display all configuration values in a panel.
+
+    Reads directly from the live `config` module so callers don't need to
+    thread the ever-growing list of settings through every call site.
+    """
+    from . import config
 
     config_table = Table.grid(padding=(0, 2))
     config_table.add_column(style="bold cyan", justify="right")
     config_table.add_column(style="white")
 
-    server_url_display = server_url or "[dim]Not configured[/dim]"
-    config_table.add_row("Server URL:", server_url_display)
-    if health_url:
-        config_table.add_row("Health URL:", health_url)
+    not_set = "[dim]Not configured[/dim]"
+
+    config_table.add_row("Server URL:", config.MCP_SERVER_URL or not_set)
+    config_table.add_row("Health URL:", config.MCP_HEALTH_URL or not_set)
+
+    # Mask the token — show enough to identify it without leaking the secret.
+    if config.MCP_TOKEN:
+        token_display = (
+            config.MCP_TOKEN[:8] + "..." if len(config.MCP_TOKEN) > 8 else "[dim]hidden[/dim]"
+        )
     else:
-        config_table.add_row("Health URL:", "[dim]Not configured[/dim]")
+        token_display = not_set
+    config_table.add_row("Token:", token_display)
+
+    verbose_display = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
+    config_table.add_row("Verbose:", verbose_display)
 
     console.print()
     console.print(
@@ -77,7 +97,8 @@ def display_step(
     step_text = f"[{color}]{icon} Step {step_num}/{total_steps}:[/{color}] [bold {color}]{title}[/bold {color}]"
 
     if update:
-        # Move cursor up one line and clear it, then print the updated status
+        # In-place update: rewind one line and clear it, so a "Step 1: ✓"
+        # success replaces the earlier "Step 1: ⏳ in progress" line.
         console.control(Control((ControlType.CURSOR_UP, 1), (ControlType.ERASE_IN_LINE, 2)))
         console.print(step_text)
     else:
@@ -100,7 +121,7 @@ def display_tools(tools: List[Any]):
 
     for i, tool in enumerate(tools, 1):
         description = tool.description.strip() if tool.description else "No description"
-        # Truncate long descriptions for compact display
+        # Truncate to keep each tool on a single 100-col line.
         if len(description) > 60:
             description = description[:57] + "..."
         console.print(
@@ -110,68 +131,6 @@ def display_tools(tools: List[Any]):
     console.print()
 
 
-def _highlight_json_in_text(text: str):
-    """Highlight JSON content in text with syntax colors.
-
-    Detects JSON objects/arrays and applies basic syntax highlighting.
-    Returns a Text object with styled content.
-    """
-    import re
-
-    # Simple check if text looks like it contains JSON
-    if not any(char in text for char in ["{", "[", '":']):
-        return text
-
-    # Try to detect and highlight JSON-like patterns
-    result = Text()
-
-    # Pattern to match JSON-like content (simple approach)
-    # This will highlight common JSON patterns with colors
-    current_pos = 0
-
-    # Find JSON strings (simple pattern for "key": "value")
-    string_pattern = r'"([^"\\]*(\\.[^"\\]*)*)"'
-
-    for match in re.finditer(string_pattern, text):
-        # Add text before match
-        if match.start() > current_pos:
-            result.append(text[current_pos : match.start()])
-
-        # Add the matched string with color
-        matched_text = match.group(0)
-
-        # Check if this looks like a key (followed by :)
-        next_char_pos = match.end()
-        if next_char_pos < len(text) and text[next_char_pos : next_char_pos + 1].strip().startswith(
-            ":"
-        ):
-            result.append(matched_text, style="bold cyan")  # JSON key
-        else:
-            result.append(matched_text, style="green")  # JSON value
-
-        current_pos = match.end()
-
-    # Add remaining text
-    if current_pos < len(text):
-        remaining = text[current_pos:]
-        # Highlight other JSON syntax
-        remaining = remaining.replace("{", "{\u200b")  # Add zero-width space for splitting
-        remaining = remaining.replace("}", "}\u200b")
-        remaining = remaining.replace("[", "[\u200b")
-        remaining = remaining.replace("]", "]\u200b")
-        remaining = remaining.replace(":", ":\u200b")
-
-        for part in remaining.split("\u200b"):
-            if part in ["{", "}", "[", "]"]:
-                result.append(part, style="bold yellow")
-            elif part == ":":
-                result.append(part, style="dim")
-            else:
-                result.append(part)
-
-    return result if len(result) > 0 else text
-
-
 def display_tool_header(tool: Any):
     """Display a simple header for the tool view."""
     console.print()
@@ -179,14 +138,32 @@ def display_tool_header(tool: Any):
     console.print()
 
 
+def display_commands(items: List[tuple]):
+    """Render a uniform 'Commands:' block.
+
+    Args:
+        items: list of (key_label, description) tuples. Use 'Enter' as the
+        key_label for the Enter key (it will be rendered as [Enter]).
+    """
+    console.print("[bold underline]Commands:[/bold underline]")
+    # Pad each key to the widest label so all the descriptions line up vertically.
+    max_visible = max(len(f"[{k}]") for k, _ in items)
+    for key, desc in items:
+        pad = " " * (max_visible - len(f"[{key}]"))
+        console.print(f"  [bold cyan]\\[{key}][/bold cyan]{pad} - {desc}")
+    console.print()
+
+
 def display_tool_menu():
     """Display the tool view menu options."""
-    console.print("[bold underline]Options:[/bold underline]")
-    console.print("  [bold cyan]d[/bold cyan] - View details")
-    console.print("  [bold cyan]r[/bold cyan] - Run tool")
-    console.print("  [bold cyan]b[/bold cyan] - Back to tool list")
-    console.print("  [bold cyan]q[/bold cyan] - Quit")
-    console.print()
+    display_commands(
+        [
+            ("d", "View details"),
+            ("r", "Run tool"),
+            ("b", "Back to tool list"),
+            ("q", "Quit"),
+        ]
+    )
 
 
 def _parse_description_with_code_blocks(description: str) -> List[Any]:

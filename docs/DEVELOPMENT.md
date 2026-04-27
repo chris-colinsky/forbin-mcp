@@ -27,19 +27,22 @@ make pre-commit-install # Set up git hooks
 ```
 forbin/
 ├── forbin/                      # Main package
-│   ├── __init__.py
-│   ├── __main__.py             # Module entry point
-│   ├── cli.py                  # CLI application
-│   ├── client.py               # MCP connection logic
-│   ├── config.py               # Configuration
-│   ├── display.py              # UI logic
-│   ├── tools.py                # Tool handling
-│   └── utils.py                # Utilities
+│   ├── __init__.py             # Package exports + __version__
+│   ├── __main__.py             # `python -m forbin` entry point
+│   ├── cli.py                  # Argument dispatch + interactive session
+│   ├── client.py               # MCP connection + wake-up
+│   ├── config.py               # Config load/save + first-run wizard
+│   ├── display.py              # Rich-based UI primitives
+│   ├── tools.py                # Parameter parsing + tool calls
+│   ├── utils.py                # FilteredStderr + key listeners
+│   └── verbose.py              # vlog / vlog_json / vlog_timing
 ├── tests/                       # Test suite
 │   ├── __init__.py
 │   ├── conftest.py             # Pytest fixtures
 │   ├── test_main.py            # Unit tests
-│   └── test_integration.py     # Integration tests
+│   ├── test_integration.py     # Integration tests
+│   └── test_version.py         # Version-drift guard
+├── docs/                        # Long-form documentation (architecture, config, usage, etc.)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml              # CI/CD pipeline
@@ -49,7 +52,6 @@ forbin/
 ├── .env.example                # Example environment config
 ├── CLAUDE.md                   # AI assistant guidance
 ├── CONTRIBUTING.md             # Contribution guidelines
-├── DEVELOPMENT.md              # This file
 └── README.md                   # Main documentation
 ```
 
@@ -59,8 +61,9 @@ forbin/
 
 We use **pytest** with comprehensive unit and integration tests:
 
-- **Unit tests** (`test_forbin.py`) - Test individual functions in isolation
+- **Unit tests** (`test_main.py`) - Test individual functions in isolation
 - **Integration tests** (`test_integration.py`) - Test complete workflows
+- **Version guard** (`test_version.py`) - Fails CI if `__version__` drifts from `pyproject.toml`
 - **Fixtures** (`conftest.py`) - Reusable test components
 
 ### Running Tests
@@ -139,7 +142,7 @@ make format-check
 ```toml
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py313"]
 ```
 
 ### Linting with Ruff
@@ -262,7 +265,7 @@ See `.pre-commit-config.yaml` for hook configuration.
 
 Runs on every push and pull request:
 
-- **Test Job** - Runs tests on Python 3.11 and 3.12
+- **Test Job** - Runs tests on Python 3.13
 - **Lint Job** - Checks formatting and linting
 - **Validate Job** - Validates project structure
 - **Security Job** - Runs security scans
@@ -325,13 +328,13 @@ Check CI status:
 
 ```bash
 # Specific test file
-pytest tests/test_forbin.py -v
+pytest tests/test_main.py -v
 
 # Specific test class
-pytest tests/test_forbin.py::TestParameterParsing -v
+pytest tests/test_main.py::TestParameterParsing -v
 
 # Specific test function
-pytest tests/test_forbin.py::TestParameterParsing::test_parse_string -v
+pytest tests/test_main.py::TestParameterParsing::test_parse_string -v
 
 # Tests matching a pattern
 pytest -k "test_parse" -v
@@ -369,53 +372,7 @@ pytest tests/ --pdb
 
 ## Release Process
 
-### Creating a Release
-
-1. **Update version** in `pyproject.toml`:
-   ```toml
-   version = "0.2.0"
-   ```
-
-2. **Update CHANGELOG** (if you have one)
-
-3. **Commit version bump**:
-   ```bash
-   git add pyproject.toml
-   git commit -m "Bump version to 0.2.0"
-   ```
-
-4. **Create and push tag**:
-   ```bash
-   git tag v0.2.0
-   git push origin main --tags
-   ```
-
-5. **Publish to PyPI**:
-   ```bash
-   make publish
-   ```
-
-### Test Release
-
-Test on TestPyPI first:
-
-```bash
-make publish-test
-```
-
-Then verify installation:
-```bash
-pip install -i https://test.pypi.org/simple/ forbin
-```
-
-### Homebrew Release
-
-After publishing to PyPI, update the Homebrew tap:
-
-1. Update the formula in `homebrew-forbin` repository
-2. Update the version and SHA256 hash
-3. Test locally with `brew install --build-from-source forbin`
-4. Push the updated formula
+Releases are automated. See [RELEASING.md](RELEASING.md) for the full flow — bump version in `pyproject.toml`, commit, push a `v*.*.*` tag, and the release workflow handles PyPI publishing, GitHub Release creation, and Homebrew tap updates (including the two-stage bottle build).
 
 ## Getting Help
 

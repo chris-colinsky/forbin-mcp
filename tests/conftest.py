@@ -4,6 +4,19 @@ import pytest
 from unittest.mock import Mock, AsyncMock
 
 
+@pytest.fixture(autouse=True)
+def _skip_first_run_wizard(monkeypatch):
+    """Prevent any test that exercises async_main / test_connectivity from
+    triggering the interactive first-run wizard.
+
+    The wizard fires when ~/.forbin/config.json doesn't exist, which is
+    typical on CI runners but rare on dev boxes (where the file usually
+    exists from running the tool). Without this stub, the wizard calls
+    `input()` and pytest's stdin capture raises OSError — making the test
+    suite green locally and red on CI."""
+    monkeypatch.setattr("forbin.cli.is_first_run", lambda: False)
+
+
 @pytest.fixture
 def mock_tool():
     """Create a mock MCP tool."""

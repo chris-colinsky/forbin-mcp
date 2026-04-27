@@ -5,17 +5,21 @@ import select
 from . import config
 
 
-# Suppress stderr warnings from MCP library (like "Session termination failed: 400")
+# Stderr proxy that hides known-noisy MCP library output (e.g. the harmless
+# "Session termination failed: 400" warning) without losing genuine errors.
 class FilteredStderr:
     def __init__(self, original_stderr):
         self.original_stderr = original_stderr
+        # Substring matches — any line containing one of these triggers
+        # suppression of itself plus the lines that typically follow it
+        # (the rest of a traceback or the stack frames around `raise`/`await`).
         self.suppress_patterns = [
             "Error in post_writer",
             "Session termination failed",
             "httpx.HTTPStatusError",
             "streamable_http.py",
             "Traceback (most recent call last)",
-            "File ",  # Suppress file paths in tracebacks
+            "File ",  # File paths in tracebacks
             "raise ",
             "await ",
             "BrokenResourceError",
@@ -24,30 +28,29 @@ class FilteredStderr:
             "handle_request_async",
             "_handle_post_request",
         ]
-        self.buffer = ""
         self.suppressing = False
+        # When suppressing, swallow up to this many follow-up lines unless
+        # we hit a blank line first (which signals end-of-traceback).
         self.suppress_depth = 0
 
     def write(self, text):
-        # If verbose mode is ON, don't suppress anything
+        # Verbose mode is the user opting back in to the noise.
         if config.VERBOSE:
             self.original_stderr.write(text)
             return
 
-        # Check if this line starts a suppressible error block
+        # New suppressible block — start swallowing.
         if any(pattern in text for pattern in self.suppress_patterns):
             self.suppressing = True
-            self.suppress_depth = 10  # Suppress next 10 lines
+            self.suppress_depth = 10
             return
 
-        # If we're suppressing, decrement counter
+        # Mid-suppression: blank line ends it, anything else burns one slot.
         if self.suppressing:
             if text.strip() == "":
-                # Blank line ends suppression
                 self.suppressing = False
                 self.suppress_depth = 0
             else:
-                # Any line during suppression decrements counter
                 self.suppress_depth -= 1
                 if self.suppress_depth <= 0:
                     self.suppressing = False
@@ -55,9 +58,7 @@ class FilteredStderr:
 
             return
 
-        # If not suppressing, write to original stderr
-        if not self.suppressing:
-            self.original_stderr.write(text)
+        self.original_stderr.write(text)
 
     def flush(self):
         self.original_stderr.flush()
@@ -90,6 +91,8 @@ _logging_setup = False
 
 def setup_logging():
     """Replace stderr with filtered version and suppress noisy MCP library logging."""
+    # Idempotent — the CLI calls this exactly once but we guard anyway so
+    # double-imports in tests don't stack handlers or proxies.
     global _logging_setup
     if _logging_setup:
         return
@@ -97,16 +100,17 @@ def setup_logging():
 
     sys.stderr = FilteredStderr(sys.stderr)
 
-    # The MCP library's logging handlers may hold a reference to the original stderr
-    # (captured at import time), bypassing FilteredStderr. Suppress the noisy
-    # "Error in post_writer" 400 errors directly via the logging system.
+    # The MCP library's logging handlers may hold a reference to the original
+    # stderr (captured at import time), bypassing FilteredStderr. Suppress the
+    # noisy "Error in post_writer" 400 errors directly via the logging system.
     class _MCPVerboseGate(logging.Filter):
         def filter(self, record):
             return config.VERBOSE
 
     logging.getLogger("mcp.client.streamable_http").addFilter(_MCPVerboseGate())
 
-    # Attach verbose handlers for HTTP and MCP transport details
+    # Route httpx + MCP transport logs through vlog() so they only show
+    # when the user toggles verbose mode on.
     httpx_handler = _VerboseLogHandler("httpx")
     httpx_handler.setLevel(logging.DEBUG)
     httpx_logger = logging.getLogger("httpx")
@@ -120,12 +124,55 @@ def setup_logging():
     mcp_logger.setLevel(logging.DEBUG)
 
 
+def read_single_key() -> str | None:
+    """
+    Block until the user presses one key, then return it lowercased.
+    Returns None when stdin isn't a TTY (e.g. pytest capture, piped input)
+    or when termios/tty aren't importable (Windows) — callers treat this as
+    "skip the prompt" rather than a hard failure.
+    """
+    try:
+        import termios
+        import tty
+    except ImportError:
+        return None
+
+    try:
+        fd = sys.stdin.fileno()
+    except (AttributeError, OSError):
+        return None
+    if not sys.stdin.isatty():
+        return None
+
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        char = sys.stdin.read(1)
+        return char.lower()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text to the system clipboard. Returns False if the platform
+    backend isn't available (e.g. headless Linux without xclip/xsel)."""
+    try:
+        # Lazy import: a missing native backend on the user's machine should
+        # only break the copy path, not forbin's overall importability.
+        import pyperclip
+
+        pyperclip.copy(text)
+        return True
+    except Exception:
+        return False
+
+
 async def listen_for_toggle():
     """
     Background task to listen for 'v' key to toggle verbose logging.
     Uses non-blocking stdin read.
     """
-    # Only try to import termios/tty on Unix-like systems
+    # termios/tty are POSIX-only; bail silently on Windows so the CLI still works.
     try:
         import termios
         import tty
@@ -133,15 +180,17 @@ async def listen_for_toggle():
         return
 
     fd = sys.stdin.fileno()
-    # Check if we are in a terminal
+    # Skip if stdin isn't a tty (e.g. piped input, CI, pytest capture).
     if not sys.stdin.isatty():
         return
 
+    # Switch to cbreak so single keypresses arrive without Enter, and
+    # always restore on exit so the user's shell isn't left in raw mode.
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
         while True:
-            # Non-blocking check for input
+            # 100ms poll keeps CPU near zero while still feeling responsive.
             if select.select([sys.stdin], [], [], 0.1)[0]:
                 char = sys.stdin.read(1).lower()
                 if char == "v":
@@ -153,12 +202,12 @@ async def listen_for_toggle():
                         if config.VERBOSE
                         else "[bold red]OFF[/bold red]"
                     )
-                    # Clear current line and print toggle status
                     console.print(f"\n[bold cyan]Verbose logging toggled {status}[/bold cyan]")
 
             await asyncio.sleep(0.1)
     except Exception:
-        # Silently fail if something goes wrong with the terminal settings
+        # Terminal manipulation can fail in odd environments — don't take
+        # down the whole CLI just because the toggle key stopped working.
         pass
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)

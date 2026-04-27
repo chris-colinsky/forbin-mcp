@@ -265,8 +265,85 @@ class TestCallTool:
         assert "Tool execution failed" in captured.out
 
 
+class TestClipboard:
+    """Test clipboard copy helpers and the post-result prompt branch."""
+
+    def test_copy_to_clipboard_success(self):
+        with patch("pyperclip.copy") as mock_copy:
+            assert forbin.utils.copy_to_clipboard("hello") is True
+            mock_copy.assert_called_once_with("hello")
+
+    def test_copy_to_clipboard_failure(self):
+        with patch("pyperclip.copy", side_effect=RuntimeError("no backend")):
+            assert forbin.utils.copy_to_clipboard("hello") is False
+
+    @pytest.mark.asyncio
+    async def test_call_tool_copies_on_c(self, mock_mcp_client, mock_tool, capsys):
+        # Swap in a JSON response so we can also assert the copied text is
+        # the formatted JSON the user just saw rather than the raw string.
+        mock_result = Mock()
+        content = Mock()
+        content.text = '{"answer":42}'
+        mock_result.content = [content]
+        mock_mcp_client.call_tool = AsyncMock(return_value=mock_result)
+
+        with (
+            patch("forbin.tools.read_single_key", return_value="c"),
+            patch("forbin.tools.copy_to_clipboard", return_value=True) as mock_copy,
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        captured = capsys.readouterr()
+        assert "Copied to clipboard" in captured.out
+        mock_copy.assert_called_once()
+        copied_text = mock_copy.call_args[0][0]
+        # Formatted JSON has indentation, which the raw response does not.
+        assert '"answer": 42' in copied_text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_skips_on_other_key(self, mock_mcp_client, mock_tool, capsys):
+        with (
+            patch("forbin.tools.read_single_key", return_value=""),
+            patch("forbin.tools.copy_to_clipboard") as mock_copy,
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        mock_copy.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Copied to clipboard" not in captured.out
+
+    @pytest.mark.asyncio
+    async def test_call_tool_skips_on_non_tty(self, mock_mcp_client, mock_tool, capsys):
+        # read_single_key returns None when stdin isn't a TTY — the prompt
+        # branch must early-out without invoking the clipboard.
+        with (
+            patch("forbin.tools.read_single_key", return_value=None),
+            patch("forbin.tools.copy_to_clipboard") as mock_copy,
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        mock_copy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_call_tool_copy_failure_message(self, mock_mcp_client, mock_tool, capsys):
+        with (
+            patch("forbin.tools.read_single_key", return_value="c"),
+            patch("forbin.tools.copy_to_clipboard", return_value=False),
+        ):
+            await forbin.tools.call_tool(mock_mcp_client, mock_tool, {"param": "v"})
+
+        captured = capsys.readouterr()
+        assert "Could not access clipboard" in captured.out
+
+
 class TestFilteredStderr:
     """Test stderr filtering."""
+
+    @pytest.fixture(autouse=True)
+    def _disable_verbose(self, monkeypatch):
+        # FilteredStderr is a no-op when VERBOSE is True; force it off so the
+        # filter logic actually runs regardless of the user's local config file.
+        monkeypatch.setattr(forbin.config, "VERBOSE", False)
 
     def test_filter_suppressed_pattern(self):
         """Test that suppressed patterns are filtered."""
@@ -322,12 +399,48 @@ class TestMainFunction:
             patch("forbin.config.MCP_SERVER_URL", "http://test.local/mcp"),
             patch("forbin.config.MCP_TOKEN", "test-token"),
             patch("forbin.config.MCP_HEALTH_URL", "http://test.local/health"),
+            patch("forbin.cli.confirm_or_edit_config", return_value=True),
             patch("httpx.AsyncClient", return_value=mock_httpx_client),
             patch("forbin.client.Client", return_value=mock_mcp_client),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
-            await forbin.cli.async_main()
+            exit_code = await forbin.cli.async_main()
 
             # Should have attempted to wake up server and connect
             mock_httpx_client.get.assert_called()
             mock_mcp_client.__aenter__.assert_called()
+            # Successful run must signal exit 0 to the CI caller.
+            assert exit_code == 0
+
+    @pytest.mark.asyncio
+    async def test_main_test_mode_exits_nonzero_on_failure(self):
+        """`forbin --test` must exit non-zero when the server is unreachable —
+        otherwise CI smoke tests pass silently against dead servers."""
+        # Patch the symbol where it's used (forbin.cli, not forbin.client) so
+        # the in-module binding is replaced. (None, []) simulates a connect
+        # failure that exhausted retries.
+        with (
+            patch("sys.argv", ["forbin.py", "--test"]),
+            patch("forbin.config.MCP_SERVER_URL", "http://nonexistent.invalid/mcp"),
+            patch("forbin.config.MCP_TOKEN", "test-token"),
+            patch("forbin.config.MCP_HEALTH_URL", None),
+            patch("forbin.cli.confirm_or_edit_config", return_value=True),
+            patch(
+                "forbin.cli.connect_and_list_tools",
+                new=AsyncMock(return_value=(None, [])),
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            exit_code = await forbin.cli.async_main()
+            assert exit_code == 1
+
+    @pytest.mark.asyncio
+    async def test_main_test_mode_exits_nonzero_on_user_quit(self):
+        """User-cancellation at the config gate must also yield non-zero —
+        the test didn't actually run, so it shouldn't report success."""
+        with (
+            patch("sys.argv", ["forbin.py", "--test"]),
+            patch("forbin.cli.confirm_or_edit_config", return_value=False),
+        ):
+            exit_code = await forbin.cli.async_main()
+            assert exit_code == 1

@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 from .display import console
+from .utils import copy_to_clipboard, read_single_key
 from .verbose import vlog_json, vlog_timing
 
 if TYPE_CHECKING:
@@ -32,28 +33,21 @@ async def list_tools(mcp_session: "MCPSession") -> List[Any]:
 
 def parse_parameter_value(value_str: str, param_type: str) -> Any:
     """Parse a string input into the appropriate type."""
+    # Empty input means "skip" — caller decides whether that's allowed.
     if not value_str.strip():
         return None
 
     if param_type == "boolean":
         return value_str.lower() in ("true", "t", "yes", "y", "1")
     elif param_type == "integer":
-        try:
-            return int(value_str)
-        except ValueError:
-            # Re-raise to be caught by caller
-            raise
+        # Bare conversions: ValueError / JSONDecodeError propagate to the
+        # input loop in get_tool_parameters, which reprompts.
+        return int(value_str)
     elif param_type == "number":
-        try:
-            return float(value_str)
-        except ValueError:
-            raise
+        return float(value_str)
     elif param_type in ("object", "array"):
-        try:
-            return json.loads(value_str)
-        except json.JSONDecodeError:
-            raise
-    else:  # string
+        return json.loads(value_str)
+    else:  # string (or any unknown type — pass through verbatim)
         return value_str
 
 
@@ -79,20 +73,21 @@ def get_tool_parameters(tool: Any) -> Dict[str, Any]:
         param_desc = param_info.get("description", "")
         is_required = param_name in required
 
-        # Show parameter info
+        # Header line: name, type, required/optional badge.
         req_str = "[red](required)[/red]" if is_required else "[green](optional)[/green]"
         console.print(f"[bold cyan]{param_name}[/bold cyan] ({param_type}) {req_str}")
         if param_desc:
             console.print(f"  [dim]{param_desc}[/dim]")
 
-        # Show enum values if present
         if "enum" in param_info:
             console.print(f"  Allowed values: {', '.join(str(v) for v in param_info['enum'])}")
 
-        # Get value
+        # Reprompt loop: keep asking until we either parse the value or accept
+        # the user's empty-input "skip" for an optional field.
         while True:
             try:
-                # We use generic Prompt and handle manual validation to support complex types and skipping
+                # Plain Prompt (not IntPrompt/etc) so we can handle skipping
+                # and the wider set of MCP types ourselves.
                 value_str = Prompt.ask("  ->", default="", show_default=False)
 
                 if not value_str:
@@ -104,7 +99,6 @@ def get_tool_parameters(tool: Any) -> Dict[str, Any]:
                     else:
                         break
 
-                # Parse the value
                 value = parse_parameter_value(value_str, param_type)
                 params[param_name] = value
                 break
@@ -120,35 +114,42 @@ def get_tool_parameters(tool: Any) -> Dict[str, Any]:
 
 async def _wait_for_escape():
     """Listen for ESC key press in the background. Returns when ESC is detected."""
+    # All three early-return branches below fall back to "wait forever":
+    # the parent uses asyncio.wait(FIRST_COMPLETED), so the tool task will
+    # win the race instead. We just need this coroutine to never resolve
+    # on its own when ESC isn't actually monitorable.
     try:
         import termios
         import tty
         import select
     except ImportError:
-        # Not available on this platform; wait forever (tool call will finish first)
         await asyncio.Event().wait()
         return
 
     try:
         fd = sys.stdin.fileno()
     except (AttributeError, OSError):
-        # stdin is redirected (e.g. in pytest); wait forever
+        # stdin is redirected (e.g. in pytest); no fd to read from.
         await asyncio.Event().wait()
         return
     if not sys.stdin.isatty():
         await asyncio.Event().wait()
         return
 
+    # Switch the terminal to cbreak so single keypresses arrive without Enter.
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
         while True:
+            # Non-blocking poll: 100ms is short enough to feel responsive
+            # and long enough to keep CPU near zero.
             if select.select([sys.stdin], [], [], 0.1)[0]:
                 char = sys.stdin.read(1)
                 if char == "\x1b":  # ESC key
                     return
             await asyncio.sleep(0.1)
     finally:
+        # Always restore the terminal, even if the task is cancelled.
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
@@ -159,11 +160,11 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
     console.print(f"Tool: [bold]{tool.name}[/bold]")
     console.print()
 
-    # Verbose: show input schema
     if tool.inputSchema:
         vlog_json("Tool Input Schema", tool.inputSchema)
 
-    # Show parameters nicely
+    # Echo the parameters back as syntax-highlighted JSON so the user can
+    # confirm what's actually being sent before we await the response.
     if params:
         json_str = json.dumps(params, indent=2)
         console.print(
@@ -181,6 +182,8 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
 
     try:
         call_start = time.monotonic()
+        # Race the tool call against an ESC-key listener so the user can
+        # cancel a hanging tool without ctrl+C-ing the whole CLI.
         tool_task = asyncio.create_task(mcp_session.call_tool(tool.name, params))
         esc_task = asyncio.create_task(_wait_for_escape())
 
@@ -190,6 +193,7 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
+        # Cancel whichever task lost the race so it doesn't leak.
         for task in pending:
             task.cancel()
             try:
@@ -208,16 +212,21 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
         console.rule("[bold green]RESULT[/bold green]")
         console.print()
 
-        # Extract and display result
+        # Extract and display result. We accumulate `copyable_blocks` in
+        # parallel with rendering so the post-result clipboard prompt has
+        # access to the exact text the user just saw — including the
+        # JSON-formatted version when parsing succeeded.
+        copyable_blocks: list[str] = []
         if result.content:
             for item in result.content:
                 text = getattr(item, "text", None)
                 if text:
-                    # Try to detect if it looks like JSON for syntax highlighting
+                    # Cheap shape check before paying for json.loads — only
+                    # try to parse if the text actually looks like a JSON
+                    # object/array. Falls through to plain text on any miss.
                     text_stripped = text.strip()
                     if text_stripped.startswith(("{", "[")) and text_stripped.endswith(("}", "]")):
                         try:
-                            # Validate and pretty-print JSON
                             parsed = json.loads(text_stripped)
                             formatted = json.dumps(parsed, indent=2)
                             console.print(
@@ -228,6 +237,7 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
                                     title_align="left",
                                 )
                             )
+                            copyable_blocks.append(formatted)
                             continue
                         except json.JSONDecodeError:
                             pass
@@ -241,8 +251,11 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
                             title_align="left",
                         )
                     )
+                    copyable_blocks.append(text.strip())
                 else:
-                    console.print(str(item))
+                    rendered = str(item)
+                    console.print(rendered)
+                    copyable_blocks.append(rendered)
         else:
             console.print("[dim]No content returned[/dim]")
 
@@ -250,6 +263,32 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
         console.rule()
         console.print()
 
+        if copyable_blocks:
+            _prompt_copy_to_clipboard("\n\n".join(copyable_blocks))
+
     except Exception as e:
         console.print(f"[bold red]Tool execution failed:[/bold red] {type(e).__name__}")
         console.print(f"   Error: {e}\n")
+
+
+def _prompt_copy_to_clipboard(text: str) -> None:
+    """Offer a single-key 'c' shortcut to copy `text` to the clipboard.
+    No-op when stdin isn't a TTY (read_single_key returns None there)."""
+    console.print(
+        "[dim]Press [bold cyan]c[/bold cyan] to copy response to clipboard, "
+        "any other key to continue...[/dim]"
+    )
+    key = read_single_key()
+    if key is None:
+        return
+    # Echo a newline so subsequent menu output starts on a fresh line —
+    # the keystroke itself isn't echoed in cbreak mode.
+    console.print()
+    if key == "c":
+        if copy_to_clipboard(text):
+            console.print("[green]+ Copied to clipboard[/green]\n")
+        else:
+            console.print(
+                "[yellow]- Could not access clipboard "
+                "(install xclip/xsel on Linux, or check pyperclip docs)[/yellow]\n"
+            )

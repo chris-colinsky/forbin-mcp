@@ -48,7 +48,8 @@ class MCPSession:
             try:
                 await self.client.__aexit__(None, None, None)
             except Exception:
-                # Suppress session termination errors (these are harmless cleanup warnings)
+                # FastMCP's stream teardown can emit a "Session termination
+                # failed: 400" — harmless and unavoidable, so swallow it.
                 pass
 
 
@@ -68,6 +69,8 @@ async def wake_up_server(health_url: str, max_attempts: int = 6, wait_seconds: f
     vlog(f"Wake-up target: [bold]{health_url}[/bold]")
     wake_start = time.monotonic()
 
+    # Generous per-request timeout because cold starts on Fly.io can take
+    # 20-30s before the health endpoint even begins responding.
     async with httpx.AsyncClient(timeout=30.0) as client:
         with console.status("  [dim]Polling health endpoint...[/dim]", spinner="dots") as status:
             for attempt in range(1, max_attempts + 1):
@@ -82,16 +85,20 @@ async def wake_up_server(health_url: str, max_attempts: int = 6, wait_seconds: f
                         f"HTTP {response.status_code} ({attempt_elapsed * 1000:.0f}ms)"
                     )
 
+                    # 200 = server is awake; bail out early.
                     if response.status_code == 200:
                         vlog_timing("Total wake-up time", time.monotonic() - wake_start)
                         return True
                     else:
+                        # Only surface non-200 once we've exhausted retries.
                         if attempt == max_attempts:
                             console.print(
                                 f"  [yellow]Server responded with status {response.status_code}[/yellow]"
                             )
 
                 except (httpx.ConnectError, httpx.TimeoutException) as e:
+                    # Expected during cold start — log noisily only on the
+                    # last attempt or when verbose mode is on.
                     vlog(f"Attempt {attempt}/{max_attempts}: {type(e).__name__}")
                     if config.VERBOSE or attempt == max_attempts:
                         error_msg = f"  [yellow]Connection failed: {type(e).__name__}[/yellow]"
@@ -103,6 +110,7 @@ async def wake_up_server(health_url: str, max_attempts: int = 6, wait_seconds: f
                     if config.VERBOSE or attempt == max_attempts:
                         console.print(f"  [red]Unexpected error: {e}[/red]")
 
+                # Skip the sleep on the last iteration — there's no next attempt.
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
 
@@ -130,6 +138,7 @@ async def connect_to_mcp_server(
 
     with console.status("  [dim]Establishing connection...[/dim]", spinner="dots") as status:
         for attempt in range(1, max_attempts + 1):
+            # Track the client so the except blocks can tear it down on failure.
             client = None
             try:
                 status.update(f"  [dim]Attempt {attempt}/{max_attempts}...[/dim]")
@@ -142,7 +151,8 @@ async def connect_to_mcp_server(
                     timeout=600.0,  # Wait up to 10 minutes for tool operations
                 )
 
-                # Enter the client context and capture the session
+                # Manually enter the async context so we can hold the session
+                # open beyond this function — MCPSession.cleanup() exits it later.
                 session = await client.__aenter__()
 
                 vlog_timing(f"Connection attempt {attempt}", time.monotonic() - attempt_start)
@@ -152,7 +162,7 @@ async def connect_to_mcp_server(
                 vlog(f"Attempt {attempt}/{max_attempts}: Timeout")
                 if config.VERBOSE or attempt == max_attempts:
                     console.print("  [red]Timeout (server not responding)[/red]")
-                # Clean up partial connection
+                # Tear down whatever the client got mid-handshake before retrying.
                 if client:
                     try:
                         await client.__aexit__(None, None, None)
@@ -164,11 +174,14 @@ async def connect_to_mcp_server(
                 error_name = type(e).__name__
                 vlog(f"Attempt {attempt}/{max_attempts}: {error_name}: {e}")
                 if config.VERBOSE or attempt == max_attempts:
+                    # Broken/Closed resource errors are the typical "server
+                    # is still booting" signature — soften the message.
                     if "BrokenResourceError" in error_name or "ClosedResourceError" in error_name:
                         console.print("  [yellow]Connection error (server not ready)[/yellow]")
                     else:
                         console.print(f"  [red]{error_name}: {e}[/red]")
 
+                    # Skip the traceback for the noisy expected errors above.
                     if config.VERBOSE and not (
                         "BrokenResourceError" in error_name or "ClosedResourceError" in error_name
                     ):
@@ -176,7 +189,6 @@ async def connect_to_mcp_server(
 
                         console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
-                # Clean up partial connection
                 if client:
                     try:
                         await client.__aexit__(None, None, None)
@@ -225,13 +237,15 @@ async def connect_and_list_tools(
                     timeout=600.0,  # Wait up to 10 minutes for tool operations
                 )
 
-                # Enter the client context and capture the session
+                # Hold the context open — MCPSession.cleanup() exits it later.
                 session = await client.__aenter__()
                 mcp_session = MCPSession(client, session)
 
                 vlog_timing(f"Connection attempt {attempt}", time.monotonic() - attempt_start)
 
-                # Immediately list tools while session is fresh
+                # List tools inside the same retry attempt: if the session
+                # expires between connect and list_tools, retrying connect
+                # alone wouldn't help. Bundling them keeps the retry honest.
                 status.update(
                     f"  [dim]Retrieving tools (attempt {attempt}/{max_attempts})...[/dim]"
                 )

@@ -26,6 +26,7 @@ async def test_full_connectivity_workflow(mock_mcp_client, mock_httpx_client):
         patch("forbin.config.MCP_SERVER_URL", "http://test.local/mcp"),
         patch("forbin.config.MCP_TOKEN", "test-token"),
         patch("forbin.config.MCP_HEALTH_URL", "http://test.local/health"),
+        patch("forbin.cli.confirm_or_edit_config", return_value=True),
         patch("httpx.AsyncClient", return_value=mock_httpx_client),
         patch("forbin.client.Client", return_value=mock_mcp_client),
         patch("asyncio.sleep", new_callable=AsyncMock),
@@ -47,6 +48,7 @@ async def test_connectivity_without_health_url(mock_mcp_client):
         patch("forbin.config.MCP_SERVER_URL", "http://test.local/mcp"),
         patch("forbin.config.MCP_TOKEN", "test-token"),
         patch("forbin.config.MCP_HEALTH_URL", None),
+        patch("forbin.cli.confirm_or_edit_config", return_value=True),
         patch("forbin.client.Client", return_value=mock_mcp_client),
     ):
         await forbin.cli.test_connectivity()

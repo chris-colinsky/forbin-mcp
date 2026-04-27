@@ -1,4 +1,6 @@
 .DS_Store
+.idea/
+.claude/
 
 # Python-generated files
 __pycache__/

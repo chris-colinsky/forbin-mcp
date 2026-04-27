@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Forbin** is an interactive CLI tool for testing remote MCP (Model Context Protocol) servers and their tools. Named after Dr. Charles Forbin from "Colossus: The Forbin Project" (1970), where two computers learn to communicate - a perfect parallel to MCP enabling systems to communicate.
+**Forbin** is an interactive CLI tool for testing remote MCP (Model Context Protocol) servers and their tools. Named after Dr. Charles Forbin from "Colossus: The Forbin Project" (1970), where two computers learn to communicate — a perfect parallel to MCP enabling systems to communicate.
 
 It's designed for developers building agentic workflows and testing FastAPI/FastMCP-based remote tools. The tool specializes in handling suspended services (like Fly.io) with automatic wake-up functionality.
 
@@ -15,178 +15,185 @@ It's designed for developers building agentic workflows and testing FastAPI/Fast
 - Cold-start resilient connection logic
 - Type-safe parameter parsing
 - Connectivity testing mode
+- Clipboard copy for tool responses
+- ESC-to-cancel for in-flight tool calls
+- First-run setup wizard with persistent JSON config
 
 ## Running the Tool
+
+The package installs a `forbin` console script (see `pyproject.toml` `[project.scripts]`).
 
 ### Interactive Mode
 
 ```bash
-python forbin.py
+forbin
 ```
 
-This launches the interactive tool browser that:
-1. Wakes up suspended servers (if health URL configured)
-2. Connects to the MCP server
-3. Lists all available tools
-4. Allows interactive tool selection and calling
+Equivalent: `python -m forbin` or `uv run forbin` from a source checkout.
+
+The interactive flow:
+1. Show current configuration; let the user confirm or edit before connecting.
+2. Wake up the server if `MCP_HEALTH_URL` is configured (otherwise skip).
+3. Connect to the MCP server and list its tools in a single retry attempt.
+4. Enter the two-level interactive browser (tool list → tool view).
 
 ### Connectivity Test Mode
 
 ```bash
-python forbin.py --test
+forbin --test
 ```
 
-Tests server connectivity without running tools.
+Tests server connectivity (wake-up + connect + list tools) without entering the browser.
+
+### First-time Setup Wizard
+
+```bash
+forbin --config
+```
+
+Forces the first-run setup wizard to re-run.
 
 ### Help
 
 ```bash
-python forbin.py --help
+forbin --help
 ```
 
 ## Configuration
 
-Configuration is via `.env` file:
+Settings live in two places:
 
-- `MCP_SERVER_URL` (required) - MCP server endpoint
-- `MCP_TOKEN` (required) - Bearer token for authentication
-- `MCP_HEALTH_URL` (optional) - Health endpoint for wake-up
+1. **`.env` file or environment variables** — highest priority.
+2. **`~/.forbin/config.json`** — written by the first-run wizard and the in-app config editor.
 
-Create from template:
-```bash
-cp .env.example .env
-```
+Required:
+- `MCP_SERVER_URL` — MCP server endpoint
+- `MCP_TOKEN` — Bearer token for authentication
+
+Optional:
+- `MCP_HEALTH_URL` — Health endpoint for availability check / wake-up
+- `VERBOSE` — `true`/`false` (also persisted when toggled with `v` in the UI)
+
+Precedence is `env > config.json > default`. The config editor flags env-shadowed fields with an `(env)` tag so the user knows their edit won't survive the next launch.
 
 ## Architecture
 
-### Main Components
+### Package Layout
 
-**`forbin.py`** - Single-file CLI application with these key functions:
+```
+forbin/
+  __init__.py        # Package exports + __version__ from importlib.metadata
+  __main__.py        # python -m forbin entry point
+  cli.py             # Argument dispatch + interactive_session / test_connectivity
+  client.py          # MCPSession wrapper, wake_up_server, connect_and_list_tools
+  config.py          # Config load/save, env shadowing, first-run wizard
+  display.py         # Rich-based UI primitives (panels, step indicators, logo)
+  tools.py           # parse/get parameters, call_tool with ESC-cancel + clipboard
+  utils.py           # FilteredStderr, verbose-aware logging, key listeners
+  verbose.py         # vlog / vlog_json / vlog_timing / vtimer helpers
+```
 
-1. **wake_up_server()** (lines 72-111)
-   - Polls health endpoint until server responds
-   - 6 attempts with 5-second waits
-   - Returns True if server is awake
+### Health Endpoint Strategy
 
-2. **connect_to_mcp_server()** (lines 114-161)
-   - Establishes MCP connection with retry logic
-   - Uses `init_timeout=30.0` for cold starts
-   - 3 attempts with 5-second waits
-   - Returns connected Client or None
+When `MCP_HEALTH_URL` is set, Forbin probes the health endpoint before connecting. The probe does two things at once:
 
-3. **list_tools()** (lines 164-177)
-   - Retrieves tool manifest from server
-   - 15-second timeout for the list operation
+1. **Availability check** — confirms the server is reachable, like hitting an LLM provider's `/models` endpoint before issuing real requests.
+2. **Wake-up trigger** — on Fly.io / Railway / Render and similar suspend-on-idle platforms, the same probe rouses the instance.
 
-4. **interactive_session()** (lines 394-476)
-   - Main interactive loop
-   - Handles tool selection and parameter input
-   - Displays results
+If `MCP_HEALTH_URL` is unset, Forbin skips wake-up entirely and connects directly. That path is appropriate for always-on servers and local development.
 
-5. **test_connectivity()** (lines 348-391)
-   - Connectivity-only testing mode
-   - Useful for CI/CD health checks
+### Wake-Up Sequence
 
-### Wake-Up Process
+For configured health URLs, the flow is:
 
-Three-step approach for suspended services:
+1. **Health probe** (`client.wake_up_server`) — 6 attempts × 5s waits, 30s per-request httpx timeout.
+2. **Initialization pause** — 5s `asyncio.sleep` after the first 200 to let the MCP server's inner services finish booting.
+3. **Connect + list tools** (`client.connect_and_list_tools`) — `init_timeout=30s`, `timeout=600s`, 3 retries with 5s between.
 
-1. **Health Check Wake-Up** - Polls `/health` endpoint until 200 response
-2. **Initialization Wait** - Waits 20 seconds for MCP server to fully initialize
-3. **Connection with Retry** - Connects with extended timeout and retry logic
-
-This is critical for Fly.io and similar platforms that suspend inactive services.
+Connect and list_tools are bundled inside the same retry attempt because a session can expire between them; retrying connect alone wouldn't recover.
 
 ### Error Handling
 
-**FilteredStderr class** (lines 18-51):
-- Suppresses harmless MCP session termination errors
-- Filters stderr output for cleaner user experience
-- Specifically suppresses "Session termination failed: 400" warnings
+**`utils.FilteredStderr`** — proxies `sys.stderr` and suppresses harmless FastMCP teardown noise (e.g. "Session termination failed: 400", post_writer 400 tracebacks). Suppression is bypassed when `VERBOSE` is on so the user can opt back into the noise.
 
-**Connection retry logic**:
-- Handles `BrokenResourceError`, `ClosedResourceError`, `TimeoutError`
-- Creates fresh client on each retry attempt
-- Provides clear feedback on connection status
+**Connection retry logic** — `BrokenResourceError` and `ClosedResourceError` are softened to "Connection error (server not ready)" because they're the typical cold-start signature. Other exceptions fall through to a normal error message + traceback in verbose mode.
+
+**ESC-to-cancel** — `tools.call_tool` races the tool task against an `_wait_for_escape` listener so a hanging tool call can be aborted without ctrl-C-ing the whole CLI.
 
 ### Parameter Handling
 
-**parse_parameter_value()** (lines 236-250):
-- Converts string input to appropriate types
-- Supports: boolean, integer, number, string, object, array
-- Handles JSON parsing for complex types
+**`tools.parse_parameter_value`** — converts string input to the right type for the MCP schema: `boolean`, `integer`, `number`, `string`, `object`, `array` (last two via `json.loads`).
 
-**get_tool_parameters()** (lines 253-310):
-- Interactive parameter collection
-- Validates required vs optional parameters
-- Shows enum values when available
-- Retry loop for invalid inputs
+**`tools.get_tool_parameters`** — interactive collection loop with required/optional badges, enum hints, and reprompt-on-parse-failure.
 
 ## Development Notes
 
 ### Dependencies
 
-- **fastmcp** - MCP client library (requires >=2.0.0)
-- **httpx** - Async HTTP for health checks
-- **python-dotenv** - Environment variable management
-- **tenacity** - Retry logic utilities (currently imported but not actively used)
+- `fastmcp>=2.0.0` — MCP client library
+- `httpx>=0.24.0` — async HTTP for health checks
+- `python-dotenv>=1.0.0` — env-var loading
+- `pyperclip>=1.8.0` — clipboard copy for tool responses
+- `rich>=13.0.0` — terminal UI
 
 ### Package Management
 
-Uses `uv` for dependency management:
+Uses `uv`:
+
 ```bash
 uv sync
 ```
 
-Python 3.11+ required.
+Python **3.13+** is required (see `pyproject.toml`). The distributed package on PyPI is `forbin-mcp`; the import name and console script are `forbin`.
 
-### CLI Entry Point
+### Versioning
 
-Configured in `pyproject.toml`:
-```toml
-[project.scripts]
-mcp-test = "main:main"
-```
-
-After installation, users can run `mcp-test` directly.
+`pyproject.toml` is the single source of truth for the version. `forbin.__version__` resolves it via `importlib.metadata`, and `tests/test_version.py` fails CI if anything drifts. Do not hardcode the version anywhere else. See `docs/RELEASING.md` for the release flow.
 
 ### Making Changes
 
-When modifying the tool:
-
-1. **Connection logic** - Edit `connect_to_mcp_server()` and adjust timeouts/retries
-2. **Wake-up behavior** - Edit `wake_up_server()` and the 20-second sleep in `interactive_session()`
-3. **Display formatting** - Edit `display_tools()` and `display_tool_schema()`
-4. **Parameter parsing** - Edit `parse_parameter_value()` for new type support
-5. **Error suppression** - Edit `FilteredStderr` class patterns
+- **Connection logic** — `forbin/client.py` (`connect_and_list_tools`, `connect_to_mcp_server`, `MCPSession`)
+- **Wake-up behavior** — `forbin/client.py` `wake_up_server`, plus the 5s init `asyncio.sleep` in `forbin/cli.py` (`reconnect`, `test_connectivity`)
+- **Display formatting** — `forbin/display.py`
+- **Parameter parsing** — `forbin/tools.py` `parse_parameter_value` / `get_tool_parameters`
+- **Error suppression** — `forbin/utils.py` `FilteredStderr.suppress_patterns`
 
 ### Important Constants
 
-- **Health check**: 6 attempts x 5 seconds = 30 seconds max
-- **Initialization wait**: 20 seconds after health check
-- **Connection retry**: 3 attempts with 30-second init timeout each
-- **Tool listing timeout**: 15 seconds
+- **Health probe**: 6 attempts × 5s inter-attempt wait, 30s per-request timeout
+- **Post-wake initialization pause**: 5s
+- **Connection retry**: 3 attempts with `init_timeout=30s` each
+- **Tool listing timeout**: 15s
+- **Tool execution timeout**: 600s
 
 These are tuned for Fly.io cold starts but can be adjusted for other platforms.
 
 ## Testing
 
-The tool itself is used for testing MCP servers. To test the tester:
+Tests live in `tests/`:
 
-1. Set up a local MCP server or use a remote one
-2. Configure `.env` with server details
-3. Run `python forbin.py --test` to verify connectivity
-4. Run `python forbin.py` to test interactive mode
+- `tests/test_main.py` — unit tests
+- `tests/test_integration.py` — integration tests
+- `tests/test_version.py` — version-drift guard
+- `tests/conftest.py` — fixtures (`mock_tool`, `mock_mcp_client`, `mock_httpx_client`, etc.)
+
+Run with `make test` or `uv run pytest`.
+
+To exercise the tool against a real server:
+1. Configure `.env` or run `forbin --config`.
+2. `forbin --test` for connectivity-only.
+3. `forbin` for the full interactive session.
 
 ## FastAPI/FastMCP Server Compatibility
 
-This tool expects servers to:
-- Expose an MCP endpoint (e.g., `/mcp`)
+Forbin expects servers to:
+- Expose an MCP endpoint (typically `/mcp`)
 - Implement bearer token authentication
-- Optionally provide `/health` endpoint for wake-up detection
-- Follow MCP protocol specification
+- Optionally provide a `/health` endpoint that returns 200 when the server is ready (lightweight, no auth, no DB queries)
+- Follow the MCP protocol specification
 
 Example compatible server:
+
 ```python
 from fastapi import FastAPI
 from fastmcp import FastMCP
@@ -208,16 +215,15 @@ def health():
 ## Common Issues
 
 ### "Failed to wake up server"
-- Check `MCP_HEALTH_URL` is correct and accessible
-- Try increasing retry attempts in `wake_up_server()`
-- Remove `MCP_HEALTH_URL` if server doesn't suspend
+- Check `MCP_HEALTH_URL` is correct and accessible (try it in a browser).
+- Increase retries via `wake_up_server`'s `max_attempts` argument if your platform has very long cold-starts.
+- Remove `MCP_HEALTH_URL` if your server doesn't suspend.
 
 ### "Connection error (server not ready)"
-- Increase initialization wait time (line 410: `await asyncio.sleep(20)`)
-- Verify `MCP_SERVER_URL` and `MCP_TOKEN` are correct
-- Check server logs for initialization issues
+- Increase the post-wake initialization pause in `forbin/cli.py` (currently `asyncio.sleep(5)` in `reconnect` and `test_connectivity`).
+- Verify `MCP_SERVER_URL` and `MCP_TOKEN` are correct.
+- Toggle verbose with `v` to see the underlying exception.
 
 ### "Session termination failed: 400"
-- This is harmless and automatically suppressed
-- Occurs during FastMCP library cleanup
-- No action needed
+- Harmless FastMCP teardown noise; already suppressed by `FilteredStderr`.
+- No action needed.
