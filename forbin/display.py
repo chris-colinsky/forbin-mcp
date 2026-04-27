@@ -1,5 +1,5 @@
 import json
-from typing import List, Any, Optional
+from typing import List, Any
 from rich.console import Console, Group
 from rich.table import Table
 from rich.panel import Panel
@@ -33,19 +33,34 @@ def display_logo():
     console.print(logo)
 
 
-def display_config_panel(server_url: Optional[str], health_url: Optional[str] = None):
-    """Display configuration information in a panel."""
+def display_config_panel():
+    """Display all configuration values in a panel.
+
+    Reads directly from the live `config` module so callers don't need to
+    thread the ever-growing list of settings through every call site.
+    """
+    from . import config
 
     config_table = Table.grid(padding=(0, 2))
     config_table.add_column(style="bold cyan", justify="right")
     config_table.add_column(style="white")
 
-    server_url_display = server_url or "[dim]Not configured[/dim]"
-    config_table.add_row("Server URL:", server_url_display)
-    if health_url:
-        config_table.add_row("Health URL:", health_url)
+    not_set = "[dim]Not configured[/dim]"
+
+    config_table.add_row("Server URL:", config.MCP_SERVER_URL or not_set)
+    config_table.add_row("Health URL:", config.MCP_HEALTH_URL or not_set)
+
+    # Mask the token — show enough to identify it without leaking the secret.
+    if config.MCP_TOKEN:
+        token_display = (
+            config.MCP_TOKEN[:8] + "..." if len(config.MCP_TOKEN) > 8 else "[dim]hidden[/dim]"
+        )
     else:
-        config_table.add_row("Health URL:", "[dim]Not configured[/dim]")
+        token_display = not_set
+    config_table.add_row("Token:", token_display)
+
+    verbose_display = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
+    config_table.add_row("Verbose:", verbose_display)
 
     console.print()
     console.print(

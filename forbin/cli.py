@@ -180,7 +180,7 @@ def confirm_or_edit_config() -> bool:
     Returns True to proceed with connection, False to quit.
     """
     while True:
-        display_config_panel(config.MCP_SERVER_URL, config.MCP_HEALTH_URL)
+        display_config_panel()
 
         # Branch A: required fields missing — restrict the menu to edit-or-quit
         # so the user can't try to connect with a broken config.
@@ -227,7 +227,7 @@ def confirm_or_edit_config() -> bool:
 async def reconnect(old_session):
     """Clean up old session and establish a new connection. Returns (mcp_session, tools) or (None, None)."""
     console.print("[bold cyan]Reconnecting...[/bold cyan]")
-    display_config_panel(config.MCP_SERVER_URL, config.MCP_HEALTH_URL)
+    display_config_panel()
     overall_start = time.monotonic()
 
     # Tear down the existing session first; swallow errors because cleanup is
