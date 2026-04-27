@@ -404,8 +404,43 @@ class TestMainFunction:
             patch("forbin.client.Client", return_value=mock_mcp_client),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
-            await forbin.cli.async_main()
+            exit_code = await forbin.cli.async_main()
 
             # Should have attempted to wake up server and connect
             mock_httpx_client.get.assert_called()
             mock_mcp_client.__aenter__.assert_called()
+            # Successful run must signal exit 0 to the CI caller.
+            assert exit_code == 0
+
+    @pytest.mark.asyncio
+    async def test_main_test_mode_exits_nonzero_on_failure(self):
+        """`forbin --test` must exit non-zero when the server is unreachable —
+        otherwise CI smoke tests pass silently against dead servers."""
+        # Patch the symbol where it's used (forbin.cli, not forbin.client) so
+        # the in-module binding is replaced. (None, []) simulates a connect
+        # failure that exhausted retries.
+        with (
+            patch("sys.argv", ["forbin.py", "--test"]),
+            patch("forbin.config.MCP_SERVER_URL", "http://nonexistent.invalid/mcp"),
+            patch("forbin.config.MCP_TOKEN", "test-token"),
+            patch("forbin.config.MCP_HEALTH_URL", None),
+            patch("forbin.cli.confirm_or_edit_config", return_value=True),
+            patch(
+                "forbin.cli.connect_and_list_tools",
+                new=AsyncMock(return_value=(None, [])),
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            exit_code = await forbin.cli.async_main()
+            assert exit_code == 1
+
+    @pytest.mark.asyncio
+    async def test_main_test_mode_exits_nonzero_on_user_quit(self):
+        """User-cancellation at the config gate must also yield non-zero —
+        the test didn't actually run, so it shouldn't report success."""
+        with (
+            patch("sys.argv", ["forbin.py", "--test"]),
+            patch("forbin.cli.confirm_or_edit_config", return_value=False),
+        ):
+            exit_code = await forbin.cli.async_main()
+            assert exit_code == 1

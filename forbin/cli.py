@@ -283,8 +283,14 @@ async def reconnect(old_session):
     return mcp_session, tools
 
 
-async def test_connectivity():
-    """Test connectivity to the MCP server."""
+async def test_connectivity() -> bool:
+    """Test connectivity to the MCP server. Returns True on success, False otherwise.
+
+    The bool return drives the process exit code in `main()` so CI pipelines
+    can fail loudly when the server is unreachable. User-cancellation at the
+    config gate is treated as a non-success outcome (False) — the test didn't
+    actually run, so it shouldn't be reported as passing.
+    """
     # Background listener lets the user toggle verbose mode mid-run with 'v'.
     listener_task = asyncio.create_task(listen_for_toggle())
     mcp_session = None
@@ -294,7 +300,7 @@ async def test_connectivity():
         if is_first_run():
             run_first_time_setup()
         if not confirm_or_edit_config():
-            return
+            return False
         overall_start = time.monotonic()
 
         # Wake-up step is skipped entirely when no health URL is set.
@@ -309,7 +315,7 @@ async def test_connectivity():
 
             if not is_awake:
                 console.print("[bold red]  Failed to wake up server[/bold red]\n")
-                return
+                return False
 
             display_step(current_step, total_steps, "WAKING UP SERVER", "success", update=True)
             vlog_timing("Wake-up step", time.monotonic() - wake_start)
@@ -335,7 +341,7 @@ async def test_connectivity():
             console.print("  - The MCP server is not properly configured")
             console.print("  - The server endpoint URL is incorrect")
             console.print("  - The server is returning errors for MCP requests")
-            return
+            return False
 
         display_step(
             current_step, total_steps, "CONNECTING AND LISTING TOOLS", "success", update=True
@@ -347,6 +353,7 @@ async def test_connectivity():
             f"[bold green]Test complete![/bold green] Server has [bold cyan]{len(tools)}[/bold cyan] tools available"
         )
         console.print()
+        return True
 
     finally:
         # Always cancel the listener and tear down the session, even on error.
@@ -512,8 +519,13 @@ async def interactive_session():
             await mcp_session.cleanup()
 
 
-async def async_main():
-    """Async main entry point."""
+async def async_main() -> int:
+    """Async main entry point. Returns the process exit code.
+
+    Only `--test` propagates a non-zero status today (so CI pipelines can
+    detect a dead server). Interactive mode and `--config` always return 0
+    — there's no machine-readable failure signal those modes need to emit.
+    """
     # Install the stderr filter and verbose-aware logging handlers once,
     # before any subcommand can produce output.
     setup_logging()
@@ -522,17 +534,19 @@ async def async_main():
         # Subcommand dispatch: --test, --config, --help, or fall through to interactive.
         if len(sys.argv) > 1:
             if sys.argv[1] in ("--test", "-t"):
-                await test_connectivity()
-                return
+                ok = await test_connectivity()
+                return 0 if ok else 1
             elif sys.argv[1] in ("--config", "-c"):
                 display_logo()
                 run_first_time_setup()
-                return
+                return 0
             elif sys.argv[1] in ("--help", "-h"):
                 display_logo()
                 console.print("\n[bold]Usage:[/bold]")
                 console.print("  forbin            Run interactive session")
-                console.print("  forbin --test     Test connectivity only")
+                console.print(
+                    "  forbin --test     Test connectivity only (exits non-zero on failure)"
+                )
                 console.print("  forbin --config   Run configuration wizard")
                 console.print("  forbin --help     Show this help message")
                 console.print("\n[bold]Configuration:[/bold]")
@@ -545,14 +559,15 @@ async def async_main():
                     "  [bold cyan]'c'[/bold cyan]   - View/update configuration (in menu) or copy last response (after a tool call)"
                 )
                 console.print("  [bold cyan]ESC[/bold cyan]   - Cancel a running tool call")
-                return
+                return 0
 
         # Run interactive session by default
         await interactive_session()
+        return 0
     except asyncio.CancelledError:
-        pass
+        return 0
 
 
 def main():
     """Synchronous entry point for CLI."""
-    asyncio.run(async_main())
+    sys.exit(asyncio.run(async_main()))
