@@ -42,7 +42,7 @@ forbin/
 │   ├── test_main.py            # Unit tests
 │   ├── test_integration.py     # Integration tests
 │   └── test_version.py         # Version-drift guard
-├── docs/                        # Long-form documentation
+├── docs/                        # Long-form documentation (architecture, config, usage, etc.)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml              # CI/CD pipeline
@@ -52,7 +52,6 @@ forbin/
 ├── .env.example                # Example environment config
 ├── CLAUDE.md                   # AI assistant guidance
 ├── CONTRIBUTING.md             # Contribution guidelines
-├── DOCS.md                     # Technical deep-dive
 └── README.md                   # Main documentation
 ```
 

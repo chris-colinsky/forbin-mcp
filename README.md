@@ -271,7 +271,9 @@ Forbin's single-key shortcuts (`v`, `c`, `ESC`-to-cancel, post-call clipboard pr
 
 ### Detailed Documentation
 
-For a deep dive into the wake-up process, connection retry logic, and technical architecture, see [DOCS.md](DOCS.md).
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — full health-URL strategy, timeout knobs, and troubleshooting tables.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — internal package layout, connection lifecycle, and error-handling plumbing.
+- [docs/](docs/) — index of all long-form documentation.
 
 ## Development
 

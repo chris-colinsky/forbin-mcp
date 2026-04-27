@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Connectivity test mode** - `forbin --test` for verifying server connectivity
 - **Verbose logging toggle** - Press `v` at any time to toggle debug output
 - **Modular package structure** - Organized into cli, client, tools, display, and utils modules
-- **Comprehensive documentation** - README, CLAUDE.md, DOCS.md, USAGE.md, DEVELOPMENT.md, CONTRIBUTING.md
+- **Comprehensive documentation** - README, CLAUDE.md, docs/ARCHITECTURE.md, docs/USAGE.md, docs/DEVELOPMENT.md, CONTRIBUTING.md
 - **CI/CD pipeline** - GitHub Actions workflow for testing and linting
 - **Pre-commit hooks** - Automated code quality checks
 - **Makefile automation** - Common development tasks (`make test`, `make check`, etc.)
