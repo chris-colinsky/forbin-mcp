@@ -189,8 +189,9 @@ async def listen_for_toggle():
     if not sys.stdin.isatty():
         return
 
-    # Switch to `cbreak` mode so single keypresses arrive without Enter,
-    # and always restore on exit so the user's shell isn't left in raw mode.
+    # Switch to a raw single-character mode so keypresses arrive without
+    # Enter, and always restore on exit so the user's shell isn't left
+    # in raw mode.
     old_settings = termios.tcgetattr(fd)
     try:
         # Terminal manipulation can fail in odd environments — don't take

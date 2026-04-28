@@ -219,7 +219,10 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
         copyable_blocks: list[str] = []
         if result.content:
             for item in result.content:
-                text = getattr(item, "text", None)
+                # Explicit annotation pulls the type out of `Any` so PyCharm
+                # narrows it cleanly on the None-check below — without it,
+                # the .strip() call gets a "could be None" warning.
+                text: str | None = getattr(item, "text", None)
                 if text is not None:
                     # Cheap shape check before paying for json.loads — only
                     # try to parse if the text actually looks like a JSON
@@ -282,7 +285,7 @@ def _prompt_copy_to_clipboard(text: str) -> None:
     if key is None:
         return
     # Echo a newline so subsequent menu output starts on a fresh line —
-    # the keystroke itself isn't echoed in `cbreak` mode.
+    # the keystroke itself isn't echoed back to the terminal.
     console.print()
     if key == "c":
         if copy_to_clipboard(text):
