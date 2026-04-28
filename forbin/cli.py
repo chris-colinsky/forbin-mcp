@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import sys
 import time
@@ -62,8 +63,10 @@ def handle_config_command():
 
         # An (env) tag warns the user that .env / environment is overriding the
         # stored value — useful because edits won't survive the next launch.
-        def _env_tag(key: str) -> str:
-            return " [yellow](env)[/yellow]" if is_env_shadowed(key) else ""
+        # Param renamed from `key` to avoid shadowing the loop-local `key`
+        # bound below from `keys[choice]`.
+        def _env_tag(name: str) -> str:
+            return " [yellow](env)[/yellow]" if is_env_shadowed(name) else ""
 
         any_shadowed = any(
             is_env_shadowed(k)
@@ -257,6 +260,11 @@ def confirm_or_edit_config() -> bool:
             handle_config_command()
             continue
         console.print("[red]Invalid choice.[/red]")
+        # Loops back via while True; the unreachable return below proves
+        # to the type checker that no path falls through to an implicit
+        # None return, satisfying the `-> bool` annotation.
+        continue
+    return False  # pragma: no cover - unreachable
 
 
 async def reconnect(old_session):
@@ -268,10 +276,8 @@ async def reconnect(old_session):
     # Tear down the existing session first; swallow errors because cleanup is
     # best-effort and shouldn't block the new connection.
     if old_session:
-        try:
+        with contextlib.suppress(Exception):
             await old_session.cleanup()
-        except Exception:
-            pass
 
     # Skip the wake-up step entirely when no health URL is configured.
     total_steps = 2 if config.MCP_HEALTH_URL else 1
@@ -550,7 +556,7 @@ async def interactive_session():
             except asyncio.CancelledError:
                 pass
 
-        if mcp_session:
+        if mcp_session is not None:
             await mcp_session.cleanup()
 
 
