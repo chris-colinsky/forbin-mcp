@@ -214,6 +214,76 @@ class TestConnectToMCPServer:
             assert client is None
 
 
+class TestToolTimeoutPropagation:
+    """Verify MCP_TOOL_TIMEOUT actually flows into Client construction.
+
+    Added in response to a CoPilot review on PR #4 — the configurable
+    timeout was easy to break silently because nothing asserted the value
+    reached fastmcp.client.Client."""
+
+    @pytest.mark.asyncio
+    async def test_connect_to_mcp_server_uses_config_timeout(self, mock_mcp_client):
+        """connect_to_mcp_server must pass MCP_TOOL_TIMEOUT through to Client()."""
+        custom_timeout = 1234.0
+        captured: dict = {}
+
+        def fake_client(*args, **kwargs):
+            captured.update(kwargs)
+            return mock_mcp_client
+
+        with (
+            patch("forbin.config.MCP_SERVER_URL", "http://test.local/mcp"),
+            patch("forbin.config.MCP_TOKEN", "test-token"),
+            patch("forbin.config.MCP_TOOL_TIMEOUT", custom_timeout),
+            patch("forbin.client.Client", side_effect=fake_client),
+        ):
+            session = await forbin.client.connect_to_mcp_server(max_attempts=1, wait_seconds=0)
+
+        assert session is not None
+        assert captured["timeout"] == custom_timeout
+        # Cold-start init_timeout is independent of MCP_TOOL_TIMEOUT and
+        # shouldn't pick up the patched value by accident.
+        assert captured["init_timeout"] == 30.0
+
+    @pytest.mark.asyncio
+    async def test_connect_and_list_tools_uses_config_timeout(self, mock_mcp_client):
+        """connect_and_list_tools has its own Client() call — verify same."""
+        custom_timeout = 5678.0
+        captured: dict = {}
+
+        def fake_client(*args, **kwargs):
+            captured.update(kwargs)
+            return mock_mcp_client
+
+        with (
+            patch("forbin.config.MCP_SERVER_URL", "http://test.local/mcp"),
+            patch("forbin.config.MCP_TOKEN", "test-token"),
+            patch("forbin.config.MCP_TOOL_TIMEOUT", custom_timeout),
+            patch("forbin.client.Client", side_effect=fake_client),
+        ):
+            session, tools = await forbin.client.connect_and_list_tools(
+                max_attempts=1, wait_seconds=0
+            )
+
+        assert session is not None
+        assert captured["timeout"] == custom_timeout
+        assert captured["init_timeout"] == 30.0
+
+    def test_parse_tool_timeout_falls_back_on_invalid(self):
+        """Bad MCP_TOOL_TIMEOUT values fall back to the default rather than
+        crashing the CLI on startup. Covers empty / non-numeric / zero /
+        negative inputs."""
+        from forbin.config import DEFAULT_TOOL_TIMEOUT, _parse_tool_timeout
+
+        assert _parse_tool_timeout("") == DEFAULT_TOOL_TIMEOUT
+        assert _parse_tool_timeout("not-a-number") == DEFAULT_TOOL_TIMEOUT
+        assert _parse_tool_timeout("0") == DEFAULT_TOOL_TIMEOUT
+        assert _parse_tool_timeout("-5") == DEFAULT_TOOL_TIMEOUT
+        # Valid values pass through untouched.
+        assert _parse_tool_timeout("900") == 900.0
+        assert _parse_tool_timeout("1800.5") == 1800.5
+
+
 class TestListTools:
     """Test tool listing functionality."""
 

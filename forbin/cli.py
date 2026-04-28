@@ -338,9 +338,8 @@ async def test_connectivity() -> bool:
     config gate is treated as a non-success outcome (False) — the test didn't
     actually run, so it shouldn't be reported as passing.
     """
-    # Background listener lets the user toggle verbose mode mid-run with 'v'.
-    listener_task = asyncio.create_task(listen_for_toggle())
     mcp_session = None
+    listener_task: asyncio.Task | None = None
     try:
         display_logo()
         # First-time setup before the gate so a fresh user has values to confirm.
@@ -348,6 +347,15 @@ async def test_connectivity() -> bool:
             run_first_time_setup()
         if not confirm_or_edit_config():
             return False
+
+        # Listener is started AFTER the gate / wizard. Both use Prompt.ask /
+        # input(), which would race with listen_for_toggle()'s cbreak-mode
+        # raw-stdin reads — the listener could swallow the user's `v` before
+        # the prompt sees it, leaving Prompt.ask with just `\n` and silently
+        # taking the default action. The gate handles `v` itself, so we only
+        # need the listener during the connect phase below.
+        listener_task = asyncio.create_task(listen_for_toggle())
+
         overall_start = time.monotonic()
 
         # Wake-up step is skipped entirely when no health URL is set.
@@ -404,21 +412,25 @@ async def test_connectivity() -> bool:
 
     finally:
         # Always cancel the listener and tear down the session, even on error.
-        listener_task.cancel()
-        try:
-            await listener_task
-        except asyncio.CancelledError:
-            pass
+        # listener_task may be None if we exited before the gate completed.
+        if listener_task is not None and not listener_task.done():
+            listener_task.cancel()
+            try:
+                await listener_task
+            except asyncio.CancelledError:
+                pass
         if mcp_session:
             await mcp_session.cleanup()
 
 
 async def interactive_session():
     """Run an interactive session to explore and test MCP tools."""
-    # Listener handles 'v' for verbose toggle during the setup phase only;
-    # the main loop below takes over input handling once we're connected.
-    listener_task = asyncio.create_task(listen_for_toggle())
     mcp_session = None
+    # Listener gets started after the config gate so its cbreak-mode stdin
+    # reads don't race with the wizard / gate's Prompt.ask. Set to None up
+    # front so the finally block can handle the case where we exited before
+    # creating it.
+    listener_task: asyncio.Task | None = None
 
     try:
         display_logo()
@@ -431,6 +443,12 @@ async def interactive_session():
         # The gate blocks "connect" when required fields are missing.
         if not confirm_or_edit_config():
             return
+
+        # Listener starts AFTER the gate so its cbreak-mode raw stdin reads
+        # don't race with Prompt.ask. The gate / wizard handle `v` themselves;
+        # the listener is only useful during the connect phase below (so the
+        # user can flip verbose mid-flight to debug a hanging connection).
+        listener_task = asyncio.create_task(listen_for_toggle())
 
         # Initial connection (no prior session to clean up).
         mcp_session, tools = await reconnect(None)
@@ -449,6 +467,7 @@ async def interactive_session():
             await listener_task
         except asyncio.CancelledError:
             pass
+        listener_task = None
 
         # Main interaction loop — Tool List View. `running` is the outer escape
         # hatch so a quit from the inner Tool View also exits the outer loop.
@@ -553,9 +572,10 @@ async def interactive_session():
                 console.print("[red]Invalid choice. Enter a tool number or 'q' to quit.[/red]\n")
 
     finally:
-        # The listener may already be cancelled (we cancel it after setup);
-        # only cancel again if we exited the try block before that point.
-        if not listener_task.done():
+        # listener_task may be None (we exited before the gate completed) or
+        # already cancelled (we cancel it after setup). Only cancel again if
+        # we exited the try block before that point.
+        if listener_task is not None and not listener_task.done():
             listener_task.cancel()
             try:
                 await listener_task
