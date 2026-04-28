@@ -181,6 +181,7 @@ def confirm_or_edit_config() -> bool:
     """
     while True:
         display_config_panel()
+        verbose_state = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
 
         # Branch A: required fields missing — restrict the menu to edit-or-quit
         # so the user can't try to connect with a broken config.
@@ -190,12 +191,16 @@ def confirm_or_edit_config() -> bool:
             display_commands(
                 [
                     ("Enter", "Edit configuration"),
+                    ("v", f"Toggle verbose logging (currently: {verbose_state})"),
                     ("q", "Quit"),
                 ]
             )
             choice = Prompt.ask("Choice").strip().lower()
             if choice == "":
                 handle_config_command()
+                continue
+            if choice == "v":
+                _toggle_verbose()
                 continue
             if choice in ("q", "quit", "exit"):
                 console.print("\n[bold yellow]Exiting...[/bold yellow]")
@@ -207,6 +212,7 @@ def confirm_or_edit_config() -> bool:
         display_commands(
             [
                 ("Enter", "Connect"),
+                ("v", f"Toggle verbose logging (currently: {verbose_state})"),
                 ("c", "Change configuration"),
                 ("q", "Quit"),
             ]
@@ -218,6 +224,9 @@ def confirm_or_edit_config() -> bool:
         if choice in ("q", "quit", "exit"):
             console.print("\n[bold yellow]Exiting...[/bold yellow]")
             return False
+        if choice == "v":
+            _toggle_verbose()
+            continue
         if choice == "c":
             handle_config_command()
             continue

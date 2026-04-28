@@ -155,11 +155,21 @@ def display_commands(items: List[tuple]):
 
 
 def display_tool_menu():
-    """Display the tool view menu options."""
+    """Display the tool view menu options.
+
+    Reads `config.VERBOSE` at render time so the displayed state reflects
+    the current value after a toggle, without the caller having to thread
+    it through.
+    """
+    from . import config
+
+    verbose_state = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
     display_commands(
         [
             ("d", "View details"),
             ("r", "Run tool"),
+            ("v", f"Toggle verbose logging (currently: {verbose_state})"),
+            ("c", "Change configuration"),
             ("b", "Back to tool list"),
             ("q", "Quit"),
         ]
