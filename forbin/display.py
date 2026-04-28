@@ -61,6 +61,7 @@ def display_config_panel():
 
     verbose_display = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
     config_table.add_row("Verbose:", verbose_display)
+    config_table.add_row("Tool Timeout:", f"{config.MCP_TOOL_TIMEOUT:g}s")
 
     console.print()
     console.print(

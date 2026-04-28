@@ -66,26 +66,38 @@ def handle_config_command():
             return " [yellow](env)[/yellow]" if is_env_shadowed(key) else ""
 
         any_shadowed = any(
-            is_env_shadowed(k) for k in ("MCP_SERVER_URL", "MCP_TOKEN", "MCP_HEALTH_URL", "VERBOSE")
+            is_env_shadowed(k)
+            for k in (
+                "MCP_SERVER_URL",
+                "MCP_TOKEN",
+                "MCP_HEALTH_URL",
+                "VERBOSE",
+                "MCP_TOOL_TIMEOUT",
+            )
         )
 
         console.print()
         console.print("[bold underline]Configuration[/bold underline]")
         console.print()
         console.print(
-            f"  [bold cyan]1.[/bold cyan] MCP_SERVER_URL:  "
+            f"  [bold cyan]1.[/bold cyan] MCP_SERVER_URL:    "
             f"{config.MCP_SERVER_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_SERVER_URL')}"
         )
         console.print(
-            f"  [bold cyan]2.[/bold cyan] MCP_HEALTH_URL:  "
+            f"  [bold cyan]2.[/bold cyan] MCP_HEALTH_URL:    "
             f"{config.MCP_HEALTH_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_HEALTH_URL')} "
             f"[dim](optional — enables wake-up for suspended servers)[/dim]"
         )
         console.print(
-            f"  [bold cyan]3.[/bold cyan] MCP_TOKEN:       {token_display}{_env_tag('MCP_TOKEN')}"
+            f"  [bold cyan]3.[/bold cyan] MCP_TOKEN:         {token_display}{_env_tag('MCP_TOKEN')}"
         )
         console.print(
-            f"  [bold cyan]4.[/bold cyan] VERBOSE:         {verbose_display}{_env_tag('VERBOSE')}"
+            f"  [bold cyan]4.[/bold cyan] VERBOSE:           {verbose_display}{_env_tag('VERBOSE')}"
+        )
+        console.print(
+            f"  [bold cyan]5.[/bold cyan] MCP_TOOL_TIMEOUT:  "
+            f"{config.MCP_TOOL_TIMEOUT:g}s{_env_tag('MCP_TOOL_TIMEOUT')} "
+            f"[dim](max time to wait for a tool call to complete)[/dim]"
         )
         console.print()
         console.print(f"  [dim]Config file: {CONFIG_FILE}[/dim]")
@@ -113,10 +125,12 @@ def handle_config_command():
             continue
 
         # Map menu numbers to (env-var key, human label).
+        # Field 4 (VERBOSE) is handled above as a toggle.
         keys = {
             "1": ("MCP_SERVER_URL", "MCP Server URL"),
             "2": ("MCP_HEALTH_URL", "Health Check URL"),
             "3": ("MCP_TOKEN", "MCP Token"),
+            "5": ("MCP_TOOL_TIMEOUT", "Tool timeout (seconds)"),
         }
 
         if choice not in keys:
@@ -153,6 +167,18 @@ def handle_config_command():
             if not new_value:
                 console.print("[dim]  No change.[/dim]")
                 continue
+            # Numeric fields validate at edit time so the user sees the
+            # error immediately, instead of silently falling back to the
+            # default at parse time after they save.
+            if key == "MCP_TOOL_TIMEOUT":
+                try:
+                    parsed = float(new_value)
+                except ValueError:
+                    console.print(f"[red]  Invalid number: {new_value}[/red]")
+                    continue
+                if parsed <= 0:
+                    console.print("[red]  Tool timeout must be greater than zero.[/red]")
+                    continue
             cfg = load_config()
             cfg[key] = new_value
         elif action == "x" and current:

@@ -148,7 +148,9 @@ async def connect_to_mcp_server(
                     server_url,
                     auth=BearerAuth(token=token),
                     init_timeout=30.0,  # Extended timeout for cold starts
-                    timeout=600.0,  # Wait up to 10 minutes for tool operations
+                    # Configurable so users with long-running tools (agentic
+                    # jobs, batch workflows) can extend without code changes.
+                    timeout=config.MCP_TOOL_TIMEOUT,
                 )
 
                 # Manually enter the async context so we can hold the session
@@ -234,7 +236,9 @@ async def connect_and_list_tools(
                     server_url,
                     auth=BearerAuth(token=token),
                     init_timeout=30.0,  # Extended timeout for cold starts
-                    timeout=600.0,  # Wait up to 10 minutes for tool operations
+                    # Configurable so users with long-running tools (agentic
+                    # jobs, batch workflows) can extend without code changes.
+                    timeout=config.MCP_TOOL_TIMEOUT,
                 )
 
                 # Hold the context open — MCPSession.cleanup() exits it later.
