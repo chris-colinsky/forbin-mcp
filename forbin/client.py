@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import time
 import traceback
 
@@ -46,12 +47,10 @@ class MCPSession:
     async def cleanup(self):
         """Close the MCP session."""
         if self.client:
-            try:
+            # FastMCP's stream teardown can emit a "Session termination
+            # failed: 400" — harmless and unavoidable, so swallow it.
+            with contextlib.suppress(Exception):
                 await self.client.__aexit__(None, None, None)
-            except Exception:
-                # FastMCP's stream teardown can emit a "Session termination
-                # failed: 400" — harmless and unavoidable, so swallow it.
-                pass
 
 
 async def wake_up_server(health_url: str, max_attempts: int = 6, wait_seconds: float = 5) -> bool:
@@ -167,10 +166,10 @@ async def connect_to_mcp_server(
                     console.print("  [red]Timeout (server not responding)[/red]")
                 # Tear down whatever the client got mid-handshake before retrying.
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
             except Exception as e:
@@ -191,10 +190,10 @@ async def connect_to_mcp_server(
                         console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
 
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
@@ -266,10 +265,10 @@ async def connect_and_list_tools(
                     console.print("  [red]Timeout (server not responding)[/red]")
                 # Clean up partial connection
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
             except Exception as e:
@@ -288,10 +287,10 @@ async def connect_and_list_tools(
 
                 # Clean up partial connection
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
 
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
