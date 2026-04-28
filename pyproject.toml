@@ -29,11 +29,20 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "fastmcp>=2.0.0",
+    "fastmcp>=3.2.4",
     "httpx>=0.24.0",
     "pyperclip>=1.8.0",
-    "python-dotenv>=1.0.0",
-    "rich>=13.0.0",
+    "python-dotenv>=1.2.2",
+    "rich>=15.0.0",
+    # Transitive deps pinned to mitigate CVEs flagged by pip-audit. Remove a
+    # pin once our direct deps' own constraints catch up to the safe version.
+    "authlib>=1.6.11",          # GHSA-jj8c-mmj3-mmgv (via fastmcp)
+    "cryptography>=46.0.7",     # CVE-2026-39892 (via httpx → httpcore → ssl)
+    "pygments>=2.20.0",         # CVE-2026-4539 (via rich)
+    "python-multipart>=0.0.26", # CVE-2026-40347 (via fastmcp)
+    "requests>=2.33.0",         # CVE-2026-25645 (via fastmcp → jsonschema-path)
+    "starlette>=0.49.1",        # CVE-2025-62727 (via fastmcp)
+    "urllib3>=2.6.3",           # CVE-2026-21441 (via requests)
 ]
 
 
@@ -54,13 +63,16 @@ packages = ["forbin"]
 
 [dependency-groups]
 dev = [
-    "pytest>=7.0.0",
+    "pytest>=9.0.3",
     "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
+    "pytest-cov>=7.1.0",
+    "black>=26.3.1",
+    "ruff>=0.15.12",
+    "mypy>=1.20.2",
+    "pre-commit>=4.6.0",
+    # Transitive deps pinned to mitigate CVEs flagged by pip-audit (via pre-commit).
+    "filelock>=3.20.3",     # CVE-2026-22701
+    "virtualenv>=20.36.1",  # CVE-2026-22702
 ]
 
 [tool.ruff]
