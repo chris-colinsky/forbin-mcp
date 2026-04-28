@@ -28,4 +28,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Built with fastmcp, httpx, python-dotenv, pyperclip, and rich
 - MIT licensed
 
-[1.0.0]: https://github.com/chris-colinsky/Forbin/releases/tag/v1.0.0
+[1.0.0]: https://github.com/chris-colinsky/forbin-mcp/releases/tag/v1.0.0

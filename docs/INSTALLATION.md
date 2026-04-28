@@ -12,10 +12,10 @@ The easiest way to install Forbin on macOS or Linux:
 
 ```bash
 # Add the tap
-brew tap chris-colinsky/forbin
+brew tap chris-colinsky/forbin-mcp
 
 # Install
-brew install forbin
+brew install forbin-mcp
 
 # Verify installation
 forbin --help
@@ -24,13 +24,13 @@ forbin --help
 ### Upgrading
 
 ```bash
-brew upgrade forbin
+brew upgrade forbin-mcp
 ```
 
 ### Uninstalling
 
 ```bash
-brew uninstall forbin
+brew uninstall forbin-mcp
 ```
 
 ## pipx (All Platforms - Recommended)
@@ -118,8 +118,8 @@ For contributing or development:
 
 ```bash
 # Clone the repository
-git clone https://github.com/chris-colinsky/Forbin.git
-cd Forbin
+git clone https://github.com/chris-colinsky/forbin-mcp.git
+cd forbin-mcp
 
 # Install dependencies
 uv sync

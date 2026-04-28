@@ -7,8 +7,8 @@ Thank you for your interest in contributing to Forbin! This document provides gu
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/yourusername/forbin.git
-   cd forbin
+   git clone https://github.com/yourusername/forbin-mcp.git
+   cd forbin-mcp
    ```
 3. **Install dependencies**:
    ```bash

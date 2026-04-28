@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Push access to this repository
-- `HOMEBREW_TAP_TOKEN` secret configured in GitHub repo settings (fine-grained PAT with Contents read/write on `chris-colinsky/homebrew-forbin`)
+- `HOMEBREW_TAP_TOKEN` secret configured in GitHub repo settings (fine-grained PAT with Contents read/write on `chris-colinsky/homebrew-forbin-mcp`)
 
 ## Release Steps
 
@@ -37,7 +37,7 @@
    - Builds the package
    - Publishes to PyPI as `forbin-mcp`
    - Creates a GitHub Release with auto-generated notes
-   - Updates the Homebrew tap (`chris-colinsky/homebrew-forbin`) — see below
+   - Updates the Homebrew tap (`chris-colinsky/homebrew-forbin-mcp`) — see below
 
 ## Homebrew Bottle Build (two-stage)
 
@@ -77,11 +77,11 @@ Check that the `pypi` environment is configured in repo settings with trusted pu
 
 ### Homebrew update fails
 - Verify the `HOMEBREW_TAP_TOKEN` secret is set and not expired
-- The token needs Contents read/write permission on `chris-colinsky/homebrew-forbin`
+- The token needs Contents read/write permission on `chris-colinsky/homebrew-forbin-mcp`
 - The workflow waits 30 seconds for PyPI to index before fetching package info; if PyPI is slow, re-run the job
 
 ### Bottle build fails
-- Check the `bottles.yml` run on `chris-colinsky/homebrew-forbin`
+- Check the `bottles.yml` run on `chris-colinsky/homebrew-forbin-mcp`
 - A wheel-relocation error (`Failed changing dylib ID`) on a Rust extension means `RUSTFLAGS` didn't reach the compile step — verify `--no-binary :all:` is intact in both `release.yml` (this repo) and `Formula/forbin.rb` (tap repo).
 - A relocation failure on a C (non-Rust) extension means a wheel needs a different linker flag than `RUSTFLAGS` provides; add a `CFLAGS`/`LDFLAGS` ENV append.
 - Re-trigger by re-running the bottles workflow from the Actions tab, or pushing any change to `Formula/forbin.rb`.
