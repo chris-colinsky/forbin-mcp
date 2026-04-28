@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
 
+# Read-only by default — CI runs tests, doesn't need to write anything back
+# to the repo. Satisfies CodeQL's least-privilege check on GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
