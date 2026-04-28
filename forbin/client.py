@@ -1,6 +1,7 @@
 import asyncio
 import time
-from typing import Optional
+import traceback
+
 import httpx
 from fastmcp.client import Client
 from fastmcp.client.auth import BearerAuth
@@ -13,7 +14,7 @@ from .verbose import vlog, vlog_json, vlog_timing, vtimer
 class MCPSession:
     """Wrapper to hold both the client and session for proper lifecycle management."""
 
-    def __init__(self, client: Client, session):
+    def __init__(self, client: Client, session: Client):
         self.client = client
         self.session = session
 
@@ -120,7 +121,7 @@ async def wake_up_server(health_url: str, max_attempts: int = 6, wait_seconds: f
 
 async def connect_to_mcp_server(
     max_attempts: int = 3, wait_seconds: float = 5
-) -> Optional[MCPSession]:
+) -> MCPSession | None:
     """
     Connect to the MCP server with retry logic.
 
@@ -187,8 +188,6 @@ async def connect_to_mcp_server(
                     if config.VERBOSE and not (
                         "BrokenResourceError" in error_name or "ClosedResourceError" in error_name
                     ):
-                        import traceback
-
                         console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
                 if client:
@@ -205,7 +204,7 @@ async def connect_to_mcp_server(
 
 async def connect_and_list_tools(
     max_attempts: int = 3, wait_seconds: float = 5
-) -> tuple[Optional[MCPSession], list]:
+) -> tuple[MCPSession | None, list]:
     """
     Connect to MCP server AND list tools in a single retry loop.
 
@@ -285,8 +284,6 @@ async def connect_and_list_tools(
                     if config.VERBOSE and not (
                         "BrokenResourceError" in error_name or "ClosedResourceError" in error_name
                     ):
-                        import traceback
-
                         console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
                 # Clean up partial connection
