@@ -1,5 +1,6 @@
 import sys
 import asyncio
+import contextlib
 import logging
 import select
 from . import config
@@ -74,7 +75,9 @@ class _VerboseLogHandler(logging.Handler):
     def emit(self, record):
         if not config.VERBOSE:
             return
-        try:
+        # A logging handler must never crash the caller — drop the line
+        # silently if anything goes wrong while formatting/printing it.
+        with contextlib.suppress(Exception):
             from .verbose import vlog
 
             msg = self.format(record)
@@ -82,15 +85,13 @@ class _VerboseLogHandler(logging.Handler):
             if len(msg) > 500:
                 msg = msg[:497] + "..."
             vlog(f"[dim]\\[{self.prefix}][/dim] {msg}")
-        except Exception:
-            pass
 
 
 _logging_setup = False
 
 
 def setup_logging():
-    """Replace stderr with filtered version and suppress noisy MCP library logging."""
+    """Replace stderr with a filtered version and suppress noisy MCP library logging."""
     # Idempotent — the CLI calls this exactly once but we guard anyway so
     # double-imports in tests don't stack handlers or proxies.
     global _logging_setup
@@ -127,7 +128,7 @@ def setup_logging():
 def read_single_key() -> str | None:
     """
     Block until the user presses one key, then return it lowercased.
-    Returns None when stdin isn't a TTY (e.g. pytest capture, piped input)
+    Returns None when stdin isn't a TTY (e.g., pytest capture, piped input)
     or when termios/tty aren't importable (Windows) — callers treat this as
     "skip the prompt" rather than a hard failure.
     """
@@ -155,15 +156,19 @@ def read_single_key() -> str | None:
 
 def copy_to_clipboard(text: str) -> bool:
     """Copy text to the system clipboard. Returns False if the platform
-    backend isn't available (e.g. headless Linux without xclip/xsel)."""
+    backend isn't available (e.g., headless Linux without xclip/xsel)."""
+    # noinspection PyBroadException
     try:
         # Lazy import: a missing native backend on the user's machine should
         # only break the copy path, not forbin's overall importability.
-        import pyperclip
+        import pyperclip  # type: ignore[import-untyped]
 
         pyperclip.copy(text)
         return True
     except Exception:
+        # pyperclip raises PyperclipException, but the package's own import
+        # can also fail in unusual environments — broad catch keeps the
+        # CLI from crashing on a copy attempt regardless of the cause.
         return False
 
 
@@ -184,30 +189,29 @@ async def listen_for_toggle():
     if not sys.stdin.isatty():
         return
 
-    # Switch to cbreak so single keypresses arrive without Enter, and
-    # always restore on exit so the user's shell isn't left in raw mode.
+    # Switch to `cbreak` mode so single keypresses arrive without Enter,
+    # and always restore on exit so the user's shell isn't left in raw mode.
     old_settings = termios.tcgetattr(fd)
     try:
-        tty.setcbreak(fd)
-        while True:
-            # 100ms poll keeps CPU near zero while still feeling responsive.
-            if select.select([sys.stdin], [], [], 0.1)[0]:
-                char = sys.stdin.read(1).lower()
-                if char == "v":
-                    config.VERBOSE = not config.VERBOSE
-                    from .display import console
-
-                    status = (
-                        "[bold green]ON[/bold green]"
-                        if config.VERBOSE
-                        else "[bold red]OFF[/bold red]"
-                    )
-                    console.print(f"\n[bold cyan]Verbose logging toggled {status}[/bold cyan]")
-
-            await asyncio.sleep(0.1)
-    except Exception:
         # Terminal manipulation can fail in odd environments — don't take
         # down the whole CLI just because the toggle key stopped working.
-        pass
+        with contextlib.suppress(Exception):
+            tty.setcbreak(fd)
+            while True:
+                # 100ms poll keeps CPU near zero while still feeling responsive.
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    char = sys.stdin.read(1).lower()
+                    if char == "v":
+                        config.VERBOSE = not config.VERBOSE
+                        from .display import console
+
+                        status = (
+                            "[bold green]ON[/bold green]"
+                            if config.VERBOSE
+                            else "[bold red]OFF[/bold red]"
+                        )
+                        console.print(f"\n[bold cyan]Verbose logging toggled {status}[/bold cyan]")
+
+                await asyncio.sleep(0.1)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)

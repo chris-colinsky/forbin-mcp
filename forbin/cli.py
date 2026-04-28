@@ -18,7 +18,7 @@ from .config import (
     CONFIG_FILE,
 )
 from .utils import setup_logging, listen_for_toggle
-from .client import connect_and_list_tools, wake_up_server
+from .client import MCPSession, connect_and_list_tools, wake_up_server
 from .tools import get_tool_parameters, call_tool
 from .verbose import vlog_timing
 from .display import (
@@ -48,7 +48,10 @@ def _toggle_verbose():
 
 
 def handle_config_command():
-    """Show current config and allow interactive editing. Loops until user exits. Returns True if any setting changed."""
+    """Show the current config and allow interactive editing.
+
+    Loop until the user exits. Return True if any setting changed.
+    """
     changed = False
 
     # Outer loop: re-render the config menu after each edit until the user exits.
@@ -267,8 +270,11 @@ def confirm_or_edit_config() -> bool:
     return False  # pragma: no cover - unreachable
 
 
-async def reconnect(old_session):
-    """Clean up old session and establish a new connection. Returns (mcp_session, tools) or (None, None)."""
+async def reconnect(old_session: MCPSession | None) -> tuple[MCPSession | None, list]:
+    """Clean up the old session and establish a new connection.
+
+    Returns (mcp_session, tools) on success, or (None, []) on failure.
+    """
     console.print("[bold cyan]Reconnecting...[/bold cyan]")
     display_config_panel()
     overall_start = time.monotonic()
@@ -291,7 +297,7 @@ async def reconnect(old_session):
 
         if not is_awake:
             console.print("[bold red]  Failed to wake up server[/bold red]\n")
-            return None, None
+            return None, []
 
         display_step(current_step, total_steps, "WAKING UP SERVER", "success", update=True)
         vlog_timing("Wake-up step", time.monotonic() - wake_start)
@@ -311,7 +317,7 @@ async def reconnect(old_session):
 
     if not mcp_session:
         console.print("[bold red]  Failed to connect to MCP server[/bold red]\n")
-        return None, None
+        return None, []
 
     display_step(current_step, total_steps, "CONNECTING AND LISTING TOOLS", "success", update=True)
     vlog_timing("Connect+list step", time.monotonic() - connect_start)

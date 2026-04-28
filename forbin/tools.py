@@ -113,7 +113,7 @@ def get_tool_parameters(tool: Any) -> Dict[str, Any]:
 
 
 async def _wait_for_escape():
-    """Listen for ESC key press in the background. Returns when ESC is detected."""
+    """Listen for an ESC key press in the background. Returns when ESC is detected."""
     # All three early-return branches below fall back to "wait forever":
     # the parent uses asyncio.wait(FIRST_COMPLETED), so the tool task will
     # win the race instead. We just need this coroutine to never resolve
@@ -220,7 +220,7 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
         if result.content:
             for item in result.content:
                 text = getattr(item, "text", None)
-                if text:
+                if text is not None:
                     # Cheap shape check before paying for json.loads — only
                     # try to parse if the text actually looks like a JSON
                     # object/array. Falls through to plain text on any miss.
@@ -245,13 +245,13 @@ async def call_tool(mcp_session: "MCPSession", tool: Any, params: Dict[str, Any]
                     # For non-JSON text responses
                     console.print(
                         Panel(
-                            text.strip(),
+                            text_stripped,
                             border_style="green",
                             title="[bold]Response[/bold]",
                             title_align="left",
                         )
                     )
-                    copyable_blocks.append(text.strip())
+                    copyable_blocks.append(text_stripped)
                 else:
                     rendered = str(item)
                     console.print(rendered)
@@ -282,7 +282,7 @@ def _prompt_copy_to_clipboard(text: str) -> None:
     if key is None:
         return
     # Echo a newline so subsequent menu output starts on a fresh line —
-    # the keystroke itself isn't echoed in cbreak mode.
+    # the keystroke itself isn't echoed in `cbreak` mode.
     console.print()
     if key == "c":
         if copy_to_clipboard(text):
