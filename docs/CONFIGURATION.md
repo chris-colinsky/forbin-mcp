@@ -44,6 +44,8 @@ cp .env.example .env
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `MCP_HEALTH_URL` | Health check endpoint for wake-up | `https://my-app.fly.dev/health` |
+| `MCP_TOOL_TIMEOUT` | Max seconds to wait for a single tool call to complete (default: `600`) | `1800` |
+| `VERBOSE` | Enable verbose logging at startup (default: `false`) | `true` |
 
 ## Configuration Examples
 
@@ -168,7 +170,7 @@ Forbin uses these defaults for resilience:
 | Post-wake initialization | 5s | Wait after health check succeeds |
 | Connection retry attempts | 3 | Connect + list_tools retries |
 | Connection init timeout | 30s | MCP init timeout for cold starts |
-| Tool operation timeout | 600s | Max time for tool execution |
+| Tool operation timeout | 600s | Max time for tool execution (configurable via `MCP_TOOL_TIMEOUT`) |
 | Tool listing timeout | 15s | Timeout for retrieving tool list |
 
 These are tuned for Fly.io cold starts but work well with most platforms.

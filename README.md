@@ -1,8 +1,8 @@
 <p align="left">
-  <img src="https://raw.githubusercontent.com/chris-colinsky/Forbin/main/img/forbin_avatar.jpg" alt="Forbin Logo" width="200">
+  <img src="https://raw.githubusercontent.com/chris-colinsky/forbin-mcp/main/img/forbin_avatar.jpg" alt="Forbin Logo" width="200">
 </p>
 
-[![CI](https://github.com/chris-colinsky/Forbin/actions/workflows/ci.yml/badge.svg?branch=release/v1.0.0)](https://github.com/chris-colinsky/Forbin/actions)
+[![CI](https://github.com/chris-colinsky/forbin-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/chris-colinsky/forbin-mcp/actions)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -58,8 +58,8 @@ An interactive CLI tool for testing remote MCP (Model Context Protocol) servers 
 #### Homebrew (macOS — recommended)
 
 ```bash
-brew tap chris-colinsky/forbin
-brew install forbin
+brew tap chris-colinsky/forbin-mcp
+brew install forbin-mcp
 ```
 
 Prebuilt bottles are published for Apple Silicon (Sequoia, Tahoe). On other platforms, Homebrew falls back to building from source.
@@ -91,8 +91,8 @@ For upgrade, uninstall, and platform-specific notes (including Windows/WSL), see
 Clone and install in editable mode using [uv](https://github.com/astral-sh/uv):
 
 ```bash
-git clone https://github.com/chris-colinsky/Forbin.git
-cd Forbin
+git clone https://github.com/chris-colinsky/forbin-mcp.git
+cd forbin-mcp
 uv sync
 ```
 

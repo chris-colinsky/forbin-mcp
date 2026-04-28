@@ -5,6 +5,15 @@ on:
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
 
+# Default to read-only so individual jobs have to opt in to anything more.
+# - test / build / update-homebrew inherit read-only (build's artifact upload
+#   uses its own scoped token, and update-homebrew uses HOMEBREW_TAP_TOKEN
+#   for cross-repo writes, not GITHUB_TOKEN).
+# - publish overrides with id-token: write for PyPI's OIDC trusted publisher.
+# - release overrides with contents: write for the GitHub Release.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -93,20 +102,20 @@ jobs:
         echo "URL=$URL" >> $GITHUB_OUTPUT
         echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
 
-    - name: Checkout homebrew-forbin
+    - name: Checkout homebrew-forbin-mcp
       uses: actions/checkout@v6
       with:
-        repository: chris-colinsky/homebrew-forbin
+        repository: chris-colinsky/homebrew-forbin-mcp
         token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        path: homebrew-forbin
+        path: homebrew-forbin-mcp
 
     - name: Update formula
       run: |
-        cd homebrew-forbin
-        cat > Formula/forbin.rb << 'EOF'
-        class Forbin < Formula
+        cd homebrew-forbin-mcp
+        cat > Formula/forbin-mcp.rb << 'EOF'
+        class ForbinMcp < Formula
           desc "Interactive CLI tool for testing remote MCP (Model Context Protocol) servers"
-          homepage "https://github.com/chris-colinsky/Forbin"
+          homepage "https://github.com/chris-colinsky/forbin-mcp"
           url "${{ steps.pypi.outputs.URL }}"
           sha256 "${{ steps.pypi.outputs.SHA256 }}"
           license "MIT"
@@ -147,9 +156,9 @@ jobs:
 
     - name: Commit and push
       run: |
-        cd homebrew-forbin
+        cd homebrew-forbin-mcp
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add Formula/forbin.rb
-        git commit -m "Update forbin to v${{ steps.version.outputs.VERSION }}"
+        git add Formula/forbin-mcp.rb
+        git commit -m "Update forbin-mcp to v${{ steps.version.outputs.VERSION }}"
         git push

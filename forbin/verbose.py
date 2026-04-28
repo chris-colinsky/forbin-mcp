@@ -26,6 +26,7 @@ def vlog_json(label: str, data):
     """Print a JSON payload in a compact Rich Panel if verbose mode is on."""
     if not config.VERBOSE:
         return
+    # noinspection PyBroadException
     try:
         if isinstance(data, str):
             json_str = data
@@ -41,6 +42,9 @@ def vlog_json(label: str, data):
             )
         )
     except Exception:
+        # Intentional catch-all: a verbose helper must never crash the caller.
+        # Anything from json.dumps / Rich rendering / console.print falls back
+        # to a plain-text dump so the diagnostic info still surfaces.
         console.print(f"  [dim bold]\\[verbose][/dim bold] {label}: {data}")
 
 

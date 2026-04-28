@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import time
-from typing import Optional
+import traceback
+
 import httpx
 from fastmcp.client import Client
 from fastmcp.client.auth import BearerAuth
@@ -13,7 +15,7 @@ from .verbose import vlog, vlog_json, vlog_timing, vtimer
 class MCPSession:
     """Wrapper to hold both the client and session for proper lifecycle management."""
 
-    def __init__(self, client: Client, session):
+    def __init__(self, client: Client, session: Client):
         self.client = client
         self.session = session
 
@@ -45,12 +47,10 @@ class MCPSession:
     async def cleanup(self):
         """Close the MCP session."""
         if self.client:
-            try:
+            # FastMCP's stream teardown can emit a "Session termination
+            # failed: 400" — harmless and unavoidable, so swallow it.
+            with contextlib.suppress(Exception):
                 await self.client.__aexit__(None, None, None)
-            except Exception:
-                # FastMCP's stream teardown can emit a "Session termination
-                # failed: 400" — harmless and unavoidable, so swallow it.
-                pass
 
 
 async def wake_up_server(health_url: str, max_attempts: int = 6, wait_seconds: float = 5) -> bool:
@@ -120,7 +120,7 @@ async def wake_up_server(health_url: str, max_attempts: int = 6, wait_seconds: f
 
 async def connect_to_mcp_server(
     max_attempts: int = 3, wait_seconds: float = 5
-) -> Optional[MCPSession]:
+) -> MCPSession | None:
     """
     Connect to the MCP server with retry logic.
 
@@ -148,7 +148,9 @@ async def connect_to_mcp_server(
                     server_url,
                     auth=BearerAuth(token=token),
                     init_timeout=30.0,  # Extended timeout for cold starts
-                    timeout=600.0,  # Wait up to 10 minutes for tool operations
+                    # Configurable so users with long-running tools (agentic
+                    # jobs, batch workflows) can extend without code changes.
+                    timeout=config.MCP_TOOL_TIMEOUT,
                 )
 
                 # Manually enter the async context so we can hold the session
@@ -164,10 +166,10 @@ async def connect_to_mcp_server(
                     console.print("  [red]Timeout (server not responding)[/red]")
                 # Tear down whatever the client got mid-handshake before retrying.
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
             except Exception as e:
@@ -185,15 +187,13 @@ async def connect_to_mcp_server(
                     if config.VERBOSE and not (
                         "BrokenResourceError" in error_name or "ClosedResourceError" in error_name
                     ):
-                        import traceback
-
                         console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
 
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
@@ -203,7 +203,7 @@ async def connect_to_mcp_server(
 
 async def connect_and_list_tools(
     max_attempts: int = 3, wait_seconds: float = 5
-) -> tuple[Optional[MCPSession], list]:
+) -> tuple[MCPSession | None, list]:
     """
     Connect to MCP server AND list tools in a single retry loop.
 
@@ -234,7 +234,9 @@ async def connect_and_list_tools(
                     server_url,
                     auth=BearerAuth(token=token),
                     init_timeout=30.0,  # Extended timeout for cold starts
-                    timeout=600.0,  # Wait up to 10 minutes for tool operations
+                    # Configurable so users with long-running tools (agentic
+                    # jobs, batch workflows) can extend without code changes.
+                    timeout=config.MCP_TOOL_TIMEOUT,
                 )
 
                 # Hold the context open — MCPSession.cleanup() exits it later.
@@ -263,10 +265,10 @@ async def connect_and_list_tools(
                     console.print("  [red]Timeout (server not responding)[/red]")
                 # Clean up partial connection
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)
             except Exception as e:
@@ -281,16 +283,14 @@ async def connect_and_list_tools(
                     if config.VERBOSE and not (
                         "BrokenResourceError" in error_name or "ClosedResourceError" in error_name
                     ):
-                        import traceback
-
                         console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
                 # Clean up partial connection
                 if client:
-                    try:
+                    # Best-effort teardown — FastMCP can emit teardown noise
+                    # we'd otherwise have to suppress just to retry cleanly.
+                    with contextlib.suppress(Exception):
                         await client.__aexit__(None, None, None)
-                    except Exception:
-                        pass
 
                 if attempt < max_attempts:
                     await asyncio.sleep(wait_seconds)

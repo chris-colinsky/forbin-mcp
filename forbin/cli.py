@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import sys
 import time
@@ -17,7 +18,7 @@ from .config import (
     CONFIG_FILE,
 )
 from .utils import setup_logging, listen_for_toggle
-from .client import connect_and_list_tools, wake_up_server
+from .client import MCPSession, connect_and_list_tools, wake_up_server
 from .tools import get_tool_parameters, call_tool
 from .verbose import vlog_timing
 from .display import (
@@ -47,7 +48,10 @@ def _toggle_verbose():
 
 
 def handle_config_command():
-    """Show current config and allow interactive editing. Loops until user exits. Returns True if any setting changed."""
+    """Show the current config and allow interactive editing.
+
+    Loop until the user exits. Return True if any setting changed.
+    """
     changed = False
 
     # Outer loop: re-render the config menu after each edit until the user exits.
@@ -62,30 +66,44 @@ def handle_config_command():
 
         # An (env) tag warns the user that .env / environment is overriding the
         # stored value — useful because edits won't survive the next launch.
-        def _env_tag(key: str) -> str:
-            return " [yellow](env)[/yellow]" if is_env_shadowed(key) else ""
+        # Param renamed from `key` to avoid shadowing the loop-local `key`
+        # bound below from `keys[choice]`.
+        def _env_tag(name: str) -> str:
+            return " [yellow](env)[/yellow]" if is_env_shadowed(name) else ""
 
         any_shadowed = any(
-            is_env_shadowed(k) for k in ("MCP_SERVER_URL", "MCP_TOKEN", "MCP_HEALTH_URL", "VERBOSE")
+            is_env_shadowed(k)
+            for k in (
+                "MCP_SERVER_URL",
+                "MCP_TOKEN",
+                "MCP_HEALTH_URL",
+                "VERBOSE",
+                "MCP_TOOL_TIMEOUT",
+            )
         )
 
         console.print()
         console.print("[bold underline]Configuration[/bold underline]")
         console.print()
         console.print(
-            f"  [bold cyan]1.[/bold cyan] MCP_SERVER_URL:  "
+            f"  [bold cyan]1.[/bold cyan] MCP_SERVER_URL:    "
             f"{config.MCP_SERVER_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_SERVER_URL')}"
         )
         console.print(
-            f"  [bold cyan]2.[/bold cyan] MCP_HEALTH_URL:  "
+            f"  [bold cyan]2.[/bold cyan] MCP_HEALTH_URL:    "
             f"{config.MCP_HEALTH_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_HEALTH_URL')} "
             f"[dim](optional — enables wake-up for suspended servers)[/dim]"
         )
         console.print(
-            f"  [bold cyan]3.[/bold cyan] MCP_TOKEN:       {token_display}{_env_tag('MCP_TOKEN')}"
+            f"  [bold cyan]3.[/bold cyan] MCP_TOKEN:         {token_display}{_env_tag('MCP_TOKEN')}"
         )
         console.print(
-            f"  [bold cyan]4.[/bold cyan] VERBOSE:         {verbose_display}{_env_tag('VERBOSE')}"
+            f"  [bold cyan]4.[/bold cyan] VERBOSE:           {verbose_display}{_env_tag('VERBOSE')}"
+        )
+        console.print(
+            f"  [bold cyan]5.[/bold cyan] MCP_TOOL_TIMEOUT:  "
+            f"{config.MCP_TOOL_TIMEOUT:g}s{_env_tag('MCP_TOOL_TIMEOUT')} "
+            f"[dim](max time to wait for a tool call to complete)[/dim]"
         )
         console.print()
         console.print(f"  [dim]Config file: {CONFIG_FILE}[/dim]")
@@ -113,10 +131,12 @@ def handle_config_command():
             continue
 
         # Map menu numbers to (env-var key, human label).
+        # Field 4 (VERBOSE) is handled above as a toggle.
         keys = {
             "1": ("MCP_SERVER_URL", "MCP Server URL"),
             "2": ("MCP_HEALTH_URL", "Health Check URL"),
             "3": ("MCP_TOKEN", "MCP Token"),
+            "5": ("MCP_TOOL_TIMEOUT", "Tool timeout (seconds)"),
         }
 
         if choice not in keys:
@@ -153,6 +173,18 @@ def handle_config_command():
             if not new_value:
                 console.print("[dim]  No change.[/dim]")
                 continue
+            # Numeric fields validate at edit time so the user sees the
+            # error immediately, instead of silently falling back to the
+            # default at parse time after they save.
+            if key == "MCP_TOOL_TIMEOUT":
+                try:
+                    parsed = float(new_value)
+                except ValueError:
+                    console.print(f"[red]  Invalid number: {new_value}[/red]")
+                    continue
+                if parsed <= 0:
+                    console.print("[red]  Tool timeout must be greater than zero.[/red]")
+                    continue
             cfg = load_config()
             cfg[key] = new_value
         elif action == "x" and current:
@@ -181,6 +213,7 @@ def confirm_or_edit_config() -> bool:
     """
     while True:
         display_config_panel()
+        verbose_state = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
 
         # Branch A: required fields missing — restrict the menu to edit-or-quit
         # so the user can't try to connect with a broken config.
@@ -190,12 +223,16 @@ def confirm_or_edit_config() -> bool:
             display_commands(
                 [
                     ("Enter", "Edit configuration"),
+                    ("v", f"Toggle verbose logging (currently: {verbose_state})"),
                     ("q", "Quit"),
                 ]
             )
             choice = Prompt.ask("Choice").strip().lower()
             if choice == "":
                 handle_config_command()
+                continue
+            if choice == "v":
+                _toggle_verbose()
                 continue
             if choice in ("q", "quit", "exit"):
                 console.print("\n[bold yellow]Exiting...[/bold yellow]")
@@ -207,6 +244,7 @@ def confirm_or_edit_config() -> bool:
         display_commands(
             [
                 ("Enter", "Connect"),
+                ("v", f"Toggle verbose logging (currently: {verbose_state})"),
                 ("c", "Change configuration"),
                 ("q", "Quit"),
             ]
@@ -218,14 +256,25 @@ def confirm_or_edit_config() -> bool:
         if choice in ("q", "quit", "exit"):
             console.print("\n[bold yellow]Exiting...[/bold yellow]")
             return False
+        if choice == "v":
+            _toggle_verbose()
+            continue
         if choice == "c":
             handle_config_command()
             continue
         console.print("[red]Invalid choice.[/red]")
+        # Loops back via while True; the unreachable return below proves
+        # to the type checker that no path falls through to an implicit
+        # None return, satisfying the `-> bool` annotation.
+        continue
+    return False  # pragma: no cover - unreachable
 
 
-async def reconnect(old_session):
-    """Clean up old session and establish a new connection. Returns (mcp_session, tools) or (None, None)."""
+async def reconnect(old_session: MCPSession | None) -> tuple[MCPSession | None, list]:
+    """Clean up the old session and establish a new connection.
+
+    Returns (mcp_session, tools) on success, or (None, []) on failure.
+    """
     console.print("[bold cyan]Reconnecting...[/bold cyan]")
     display_config_panel()
     overall_start = time.monotonic()
@@ -233,10 +282,8 @@ async def reconnect(old_session):
     # Tear down the existing session first; swallow errors because cleanup is
     # best-effort and shouldn't block the new connection.
     if old_session:
-        try:
+        with contextlib.suppress(Exception):
             await old_session.cleanup()
-        except Exception:
-            pass
 
     # Skip the wake-up step entirely when no health URL is configured.
     total_steps = 2 if config.MCP_HEALTH_URL else 1
@@ -250,7 +297,7 @@ async def reconnect(old_session):
 
         if not is_awake:
             console.print("[bold red]  Failed to wake up server[/bold red]\n")
-            return None, None
+            return None, []
 
         display_step(current_step, total_steps, "WAKING UP SERVER", "success", update=True)
         vlog_timing("Wake-up step", time.monotonic() - wake_start)
@@ -270,7 +317,7 @@ async def reconnect(old_session):
 
     if not mcp_session:
         console.print("[bold red]  Failed to connect to MCP server[/bold red]\n")
-        return None, None
+        return None, []
 
     display_step(current_step, total_steps, "CONNECTING AND LISTING TOOLS", "success", update=True)
     vlog_timing("Connect+list step", time.monotonic() - connect_start)
@@ -291,9 +338,8 @@ async def test_connectivity() -> bool:
     config gate is treated as a non-success outcome (False) — the test didn't
     actually run, so it shouldn't be reported as passing.
     """
-    # Background listener lets the user toggle verbose mode mid-run with 'v'.
-    listener_task = asyncio.create_task(listen_for_toggle())
     mcp_session = None
+    listener_task: asyncio.Task | None = None
     try:
         display_logo()
         # First-time setup before the gate so a fresh user has values to confirm.
@@ -301,6 +347,15 @@ async def test_connectivity() -> bool:
             run_first_time_setup()
         if not confirm_or_edit_config():
             return False
+
+        # Listener is started AFTER the gate / wizard. Both use Prompt.ask /
+        # input(), which would race with listen_for_toggle()'s cbreak-mode
+        # raw-stdin reads — the listener could swallow the user's `v` before
+        # the prompt sees it, leaving Prompt.ask with just `\n` and silently
+        # taking the default action. The gate handles `v` itself, so we only
+        # need the listener during the connect phase below.
+        listener_task = asyncio.create_task(listen_for_toggle())
+
         overall_start = time.monotonic()
 
         # Wake-up step is skipped entirely when no health URL is set.
@@ -357,21 +412,25 @@ async def test_connectivity() -> bool:
 
     finally:
         # Always cancel the listener and tear down the session, even on error.
-        listener_task.cancel()
-        try:
-            await listener_task
-        except asyncio.CancelledError:
-            pass
+        # listener_task may be None if we exited before the gate completed.
+        if listener_task is not None and not listener_task.done():
+            listener_task.cancel()
+            try:
+                await listener_task
+            except asyncio.CancelledError:
+                pass
         if mcp_session:
             await mcp_session.cleanup()
 
 
 async def interactive_session():
     """Run an interactive session to explore and test MCP tools."""
-    # Listener handles 'v' for verbose toggle during the setup phase only;
-    # the main loop below takes over input handling once we're connected.
-    listener_task = asyncio.create_task(listen_for_toggle())
     mcp_session = None
+    # Listener gets started after the config gate so its cbreak-mode stdin
+    # reads don't race with the wizard / gate's Prompt.ask. Set to None up
+    # front so the finally block can handle the case where we exited before
+    # creating it.
+    listener_task: asyncio.Task | None = None
 
     try:
         display_logo()
@@ -384,6 +443,12 @@ async def interactive_session():
         # The gate blocks "connect" when required fields are missing.
         if not confirm_or_edit_config():
             return
+
+        # Listener starts AFTER the gate so its cbreak-mode raw stdin reads
+        # don't race with Prompt.ask. The gate / wizard handle `v` themselves;
+        # the listener is only useful during the connect phase below (so the
+        # user can flip verbose mid-flight to debug a hanging connection).
+        listener_task = asyncio.create_task(listen_for_toggle())
 
         # Initial connection (no prior session to clean up).
         mcp_session, tools = await reconnect(None)
@@ -402,6 +467,7 @@ async def interactive_session():
             await listener_task
         except asyncio.CancelledError:
             pass
+        listener_task = None
 
         # Main interaction loop — Tool List View. `running` is the outer escape
         # hatch so a quit from the inner Tool View also exits the outer loop.
@@ -506,16 +572,17 @@ async def interactive_session():
                 console.print("[red]Invalid choice. Enter a tool number or 'q' to quit.[/red]\n")
 
     finally:
-        # The listener may already be cancelled (we cancel it after setup);
-        # only cancel again if we exited the try block before that point.
-        if not listener_task.done():
+        # listener_task may be None (we exited before the gate completed) or
+        # already cancelled (we cancel it after setup). Only cancel again if
+        # we exited the try block before that point.
+        if listener_task is not None and not listener_task.done():
             listener_task.cancel()
             try:
                 await listener_task
             except asyncio.CancelledError:
                 pass
 
-        if mcp_session:
+        if mcp_session is not None:
             await mcp_session.cleanup()
 
 

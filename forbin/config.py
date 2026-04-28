@@ -88,15 +88,37 @@ def validate_config() -> bool:
     return True
 
 
+# Default tool-call timeout (seconds). Long-running MCP tools — agentic
+# workflows, batch jobs, etc. — can exceed this; bump MCP_TOOL_TIMEOUT in
+# .env or via the in-app editor to extend.
+DEFAULT_TOOL_TIMEOUT = 600.0
+
+
+def _parse_tool_timeout(raw: str) -> float:
+    """Parse the MCP_TOOL_TIMEOUT setting. Falls back to the default on
+    empty/invalid input rather than crashing — bad config shouldn't break
+    the CLI's startup."""
+    if not raw:
+        return DEFAULT_TOOL_TIMEOUT
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_TOOL_TIMEOUT
+    if value <= 0:
+        return DEFAULT_TOOL_TIMEOUT
+    return value
+
+
 def reload_config():
     """Reload module-level config variables from settings."""
     # Called after the user edits config in the CLI so the change applies
     # to the rest of the session without restarting the process.
-    global MCP_SERVER_URL, MCP_TOKEN, MCP_HEALTH_URL, VERBOSE
+    global MCP_SERVER_URL, MCP_TOKEN, MCP_HEALTH_URL, VERBOSE, MCP_TOOL_TIMEOUT
     MCP_SERVER_URL = get_setting("MCP_SERVER_URL")
     MCP_TOKEN = get_setting("MCP_TOKEN")
     MCP_HEALTH_URL = get_setting("MCP_HEALTH_URL") or None
     VERBOSE = get_setting("VERBOSE").lower() in ("true", "1", "yes")
+    MCP_TOOL_TIMEOUT = _parse_tool_timeout(get_setting("MCP_TOOL_TIMEOUT"))
 
 
 def run_first_time_setup():
@@ -164,3 +186,4 @@ MCP_TOKEN: Optional[str] = get_setting("MCP_TOKEN") or None
 
 # Runtime flags
 VERBOSE: bool = get_setting("VERBOSE").lower() in ("true", "1", "yes")
+MCP_TOOL_TIMEOUT: float = _parse_tool_timeout(get_setting("MCP_TOOL_TIMEOUT"))

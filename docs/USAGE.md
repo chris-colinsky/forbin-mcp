@@ -260,8 +260,8 @@ Test complete! Server has 3 tools available
 | Key | Context | Action |
 |-----|---------|--------|
 | `1-9` | Tool List | Select tool by number |
-| `v` | Any | Toggle verbose logging |
-| `c` | Tool List / Tool View | Change configuration |
+| `v` | Config gate / Tool List / Tool View | Toggle verbose logging (state shown inline) |
+| `c` | Config gate / Tool List / Tool View | Change configuration |
 | `c` | Post-tool-call prompt | Copy last response to clipboard |
 | `q` | Any | Quit application |
 | `d` | Tool View | View tool details |
