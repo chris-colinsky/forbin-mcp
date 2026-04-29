@@ -17,6 +17,19 @@ def _skip_first_run_wizard(monkeypatch):
     monkeypatch.setattr("forbin.cli.is_first_run", lambda: False)
 
 
+@pytest.fixture(autouse=True)
+def _stub_launch_setup(monkeypatch):
+    """Stub the v0.1.5 launch sequence (migration / wizard / picker) so
+    tests that patch ``forbin.config.MCP_*`` module globals keep working.
+
+    Without this, ``_launch_setup`` calls ``reload_config()``, which
+    re-reads profiles.json and overwrites the patches. Tests that
+    explicitly want to exercise the launch sequence can override this
+    fixture by patching ``forbin.cli._launch_setup`` directly inside the
+    test, or by writing a profiles.json into an isolated ``FORBIN_DIR``."""
+    monkeypatch.setattr("forbin.cli._launch_setup", lambda: True)
+
+
 @pytest.fixture
 def mock_tool():
     """Create a mock MCP tool."""

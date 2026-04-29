@@ -106,32 +106,27 @@ For dev dependencies, testing, linting, and pre-commit hooks, see [CONTRIBUTING.
 
 ## Configuration
 
-Forbin reads its settings from environment variables (or a `.env` file) and from `~/.forbin/config.json`. **Environment wins** when both are set. You have two ways to set up:
+Forbin stores its settings in `~/.forbin/profiles.json` — a single document that holds one or more named **profiles**, each containing one or more named **environments**. Each environment carries its own `MCP_SERVER_URL`, `MCP_HEALTH_URL`, and `MCP_TOKEN`. Pick a profile/environment per remote server you test against (e.g. `howl/prod`, `howl/preview`, `internal-api/local`).
 
-**Option 1 — First-run wizard (easiest):** just run `forbin`. If no config exists, you'll be prompted for the required values and they'll be saved to `~/.forbin/config.json`. Re-run anytime with `forbin --config`.
+**Option 1 — First-run wizard (easiest):** just run `forbin`. If no profiles file exists, you'll be prompted for the required values and they'll be saved as the `default/default` profile. Open the in-app editor anytime with `forbin --config`.
 
-**Option 2 — `.env` file (best for CI/CD or scripted setups):**
+**Option 2 — `.env` seed (one-time):** drop a `.env` in your working directory before the very first launch and Forbin imports the values into the default profile:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your MCP server details:
-
 ```env
-# Required: Your MCP server endpoint
 MCP_SERVER_URL=https://your-server.fly.dev/mcp
-
-# Required: Authentication token
 MCP_TOKEN=your-secret-token
-
-# Optional: Health check endpoint. Forbin uses this to verify availability
-# (like an LLM provider's /models) and to wake up suspended services.
-# Leave unset (or remove) to skip the wake-up step entirely.
-MCP_HEALTH_URL=https://your-server.fly.dev/health
+MCP_HEALTH_URL=https://your-server.fly.dev/health   # optional — for wake-up
 ```
 
-For full details on configuration precedence, the JSON config file, and platform-specific examples, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+After the seed, the `.env` is no longer used for connection fields — manage them through `forbin --config` or `p` mid-session. Globals (`VERBOSE`, `MCP_TOOL_TIMEOUT`) still respect `.env` and shell vars.
+
+**Switching servers** — once you have multiple profiles, Forbin shows a picker on launch. Press `p` mid-session to switch and trigger a reconnect. For scripted runs, pin a target with `forbin --profile NAME --env NAME` (does not persist). Single-profile users see no picker.
+
+For full details on the schema, migration from v0.1.4, and platform-specific examples, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ### Configuration Examples
 

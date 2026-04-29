@@ -1,11 +1,13 @@
 # Configuration Guide
 
-Forbin reads its settings from two places, in this priority order:
+Forbin's configuration lives in a single document at `~/.forbin/profiles.json`. The shape:
 
-1. **Environment variables** (including those loaded from a `.env` file in the current directory) — highest priority.
-2. **`~/.forbin/config.json`** — written by the first-run setup wizard and the in-app config editor.
+- **Profiles** — each is a named bundle of named environments. Use one profile per remote server you test against.
+- **Environments** — each lives inside a profile and carries the connection triple (`MCP_SERVER_URL`, optional `MCP_HEALTH_URL`, `MCP_TOKEN`). Use environments to model prod / preview / local within a single project.
+- **Globals** — `VERBOSE` and `MCP_TOOL_TIMEOUT` apply across all profiles.
+- **Active pointer** — which profile/environment supplies the connection fields for the current launch.
 
-Whichever source provides a value wins. The in-app config editor flags any field overridden by an environment variable with an `(env)` tag so you know your edit won't survive the next launch unless you also clear the env var.
+Picking a profile is **authoritative** for the connection fields: `.env` and shell environment variables do **not** shadow them. Globals (`VERBOSE`, `MCP_TOOL_TIMEOUT`) keep env-shadow semantics so a one-shot `VERBOSE=true forbin` still works without editing the stored config.
 
 ## Quick Setup
 
@@ -15,37 +17,104 @@ The easiest path is the first-run wizard — just run Forbin once:
 forbin
 ```
 
-If no config file exists yet, Forbin will prompt for the required values and save them to `~/.forbin/config.json`. You can re-run the wizard anytime with:
+If no `profiles.json` exists yet, Forbin prompts for the required values and saves them as the `default` environment of a `default` profile. You can re-open the in-app editor anytime with:
 
 ```bash
 forbin --config
 ```
 
-If you prefer environment variables (useful for CI/CD or containers), create a `.env` file:
+A `.env` in your working directory is honored on the very first launch as a seed — Forbin imports any `MCP_*` values it finds into the new default profile. After that, the `.env` is ignored for connection fields (only globals like `VERBOSE` keep working from `.env`).
 
-```bash
-cp .env.example .env
-# then edit .env with your settings
+### Migrating from v0.1.4 or earlier
+
+Forbin v0.1.5 introduces the profile-based config store. On the first launch with the new version, Forbin migrates your old `~/.forbin/config.json` into `profiles.json` automatically:
+
+- Connection fields (`MCP_SERVER_URL`, `MCP_HEALTH_URL`, `MCP_TOKEN`) → `default/default` environment.
+- Globals (`VERBOSE`, `MCP_TOOL_TIMEOUT`) → top-level globals.
+- The old file is renamed to `~/.forbin/config.json.bak` so you can restore it if needed.
+
+A one-time warning surfaces when `MCP_SERVER_URL`, `MCP_HEALTH_URL`, or `MCP_TOKEN` are still set in your environment / `.env` — those values no longer override the active profile.
+
+## Profiles & Environments
+
+### Switching at launch
+
+If you have more than one profile (or one profile with more than one environment), Forbin shows a picker on launch:
+
+```text
+Profile
+
+  1. default     (1 environment)  *active*
+  2. staging     (2 environments)
+  3. production  (1 environment)
+
+Commands:
+  [number] - Select a profile
+  [n]      - New profile
+  [r]      - Rename a profile
+  [d]      - Delete a profile
+  [b]      - Back / cancel
 ```
 
-> **Where Forbin looks for `.env`:** the file is loaded from the **current working directory** (or up the directory tree) at startup. If you run `forbin` from `~/Desktop` while your `.env` is in `~/projects/myapp`, it will not be picked up. Either `cd` into the project directory first, set the variables in your shell environment, or use the `~/.forbin/config.json` route instead — that file is read regardless of where you run `forbin` from.
+Single-profile / single-environment users see no picker — Forbin connects straight through to the gate.
 
-## Environment Variables
+### Switching mid-session
 
-### Required
+Press `p` from the config gate, the main tool list, or the Tool View to re-open the picker. Switching triggers a reconnect against the new environment.
+
+### CRUD inside the picker
+
+`n`, `r`, `d` create, rename, and delete profiles or environments. Refusal logic prevents:
+
+- Deleting the only profile.
+- Deleting the only environment in a profile.
+
+Profile and environment names must match `[A-Za-z0-9_.-]+` (no whitespace).
+
+### Pinning for scripted runs
+
+`--profile NAME` and `--env NAME` pin the active environment for a single invocation. The chosen pointer is **not** persisted as the new default — useful for CI:
+
+```bash
+forbin --profile staging --env eu-west --test
+```
+
+Validation lists the available names on typo. `--profile` is required when you pass `--env`. When the chosen profile has multiple environments, `--env` is required to disambiguate.
+
+### Where Forbin looks for `.env`
+
+The `.env` file is loaded from the **current working directory** (or up the directory tree) at startup. If you run `forbin` from `~/Desktop` while your `.env` is in `~/projects/myapp`, it will not be picked up. Either `cd` into the project directory first, set the variables in your shell environment, or manage values directly via the in-app editor — `profiles.json` is read regardless of where you run `forbin` from.
+
+## Setting Reference
+
+### Per-environment (lives inside a profile's environment)
+
+| Setting | Required | Description | Example |
+|---------|----------|-------------|---------|
+| `MCP_SERVER_URL` | yes | Full URL to your MCP server endpoint | `https://my-app.fly.dev/mcp` |
+| `MCP_TOKEN` | yes | Bearer token for authentication | `your-secret-token` |
+| `MCP_HEALTH_URL` | no | Health check endpoint for wake-up | `https://my-app.fly.dev/health` |
+
+These are **not** read from environment variables. Manage them via the in-app editor (`forbin --config`) or the picker.
+
+### Globals (env vars still shadow these)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `MCP_SERVER_URL` | Full URL to your MCP server endpoint | `https://my-app.fly.dev/mcp` |
-| `MCP_TOKEN` | Bearer token for authentication | `your-secret-token` |
-
-### Optional
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MCP_HEALTH_URL` | Health check endpoint for wake-up | `https://my-app.fly.dev/health` |
-| `MCP_TOOL_TIMEOUT` | Max seconds to wait for a single tool call to complete (default: `600`) | `1800` |
+| `MCP_TOOL_TIMEOUT` | Max seconds to wait for a single tool call (default: `600`) | `1800` |
 | `VERBOSE` | Enable verbose logging at startup (default: `false`) | `true` |
+
+A shell-level export or `.env` line still wins for these. The editor renders an `(env)` tag next to globals when the env is overriding the stored value.
+
+### CLI flags
+
+| Flag | Description |
+|------|-------------|
+| `--profile NAME` | Use this profile for the run (does not persist) |
+| `--env NAME` | Use this environment within the chosen profile (required when the profile has multiple environments) |
+| `--test` | Test connectivity and exit (non-zero on failure) |
+| `--config` | Open the in-app editor at the active environment |
+| `--help` | Show usage |
 
 ## Configuration Examples
 

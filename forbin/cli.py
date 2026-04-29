@@ -1,22 +1,24 @@
+import argparse
 import asyncio
 import contextlib
 import os
 import sys
 import time
+from typing import Optional
 
 from rich.prompt import Prompt
 
 from . import config
+from . import profiles
 from .config import (
     validate_config,
     is_first_run,
     is_env_shadowed,
     run_first_time_setup,
     reload_config,
-    load_config,
-    save_config,
-    CONFIG_FILE,
+    migrate_legacy_config_if_needed,
 )
+from .picker import pick_profile_and_environment
 from .utils import setup_logging, listen_for_toggle
 from .client import MCPSession, connect_and_list_tools, wake_up_server
 from .tools import get_tool_parameters, call_tool
@@ -36,173 +38,251 @@ from .display import (
 
 def _toggle_verbose():
     """Toggle verbose mode and persist the setting."""
-    # Flip the in-memory flag, then mirror it to the on-disk config.
+    # Flip the in-memory flag, then mirror it to globals in profiles.json.
     config.VERBOSE = not config.VERBOSE
-    cfg = load_config()
-    cfg["VERBOSE"] = str(config.VERBOSE).lower()
-    save_config(cfg)
+    doc = profiles.load_profiles()
+    profiles.set_global(doc, "VERBOSE", str(config.VERBOSE).lower())
+    profiles.save_profiles(doc)
     # Drop any env-var shadow so the new value sticks for the rest of this session.
     os.environ.pop("VERBOSE", None)
     status = "[bold green]ON[/bold green]" if config.VERBOSE else "[bold red]OFF[/bold red]"
     console.print(f"\n[bold cyan]Verbose logging toggled {status}[/bold cyan]\n")
 
 
-def handle_config_command():
+_PER_ENV_FIELD_LABELS = {
+    "MCP_SERVER_URL": ("MCP Server URL", ""),
+    "MCP_HEALTH_URL": (
+        "Health Check URL",
+        "[dim](optional — enables wake-up for suspended servers)[/dim]",
+    ),
+    "MCP_TOKEN": ("MCP Token", ""),
+}
+
+_GLOBAL_FIELD_LABELS = {
+    "MCP_TOOL_TIMEOUT": (
+        "Tool timeout (seconds)",
+        "[dim](max time to wait for a tool call to complete)[/dim]",
+    ),
+}
+
+
+def handle_config_command() -> bool:
     """Show the current config and allow interactive editing.
 
-    Loop until the user exits. Return True if any setting changed.
-    """
-    changed = False
+    Per-environment fields (1-3) write to the active environment in
+    profiles.json. Globals (VERBOSE toggle, MCP_TOOL_TIMEOUT) write to
+    the globals slot. ``p`` opens the picker for switch / CRUD.
 
-    # Outer loop: re-render the config menu after each edit until the user exits.
+    Returns True if a change happened that warrants reconnecting (any
+    per-environment field edited, or the active profile/environment
+    switched). Globals-only changes return False — the running session
+    can absorb them without a fresh connection.
+    """
+    needs_reconnect = False
+
     while True:
-        # Mask the token so we never echo a full secret to the terminal.
-        token_display = (
-            config.MCP_TOKEN[:8] + "..."
-            if config.MCP_TOKEN and len(config.MCP_TOKEN) > 8
-            else config.MCP_TOKEN or "[dim]Not set[/dim]"
-        )
+        doc = profiles.load_profiles()
+        try:
+            env_dict = profiles.get_active_environment(doc)
+        except Exception:
+            env_dict = {}
+
+        active_profile, active_env = profiles.get_active(doc)
+        token = env_dict.get("MCP_TOKEN") or ""
+        token_display = token[:8] + "..." if len(token) > 8 else token or "[dim]Not set[/dim]"
         verbose_display = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
 
-        # An (env) tag warns the user that .env / environment is overriding the
-        # stored value — useful because edits won't survive the next launch.
-        # Param renamed from `key` to avoid shadowing the loop-local `key`
-        # bound below from `keys[choice]`.
         def _env_tag(name: str) -> str:
+            # Per-env fields are never shadowed under v0.1.5+; this tag
+            # only renders for global keys when an env var overrides them.
             return " [yellow](env)[/yellow]" if is_env_shadowed(name) else ""
 
-        any_shadowed = any(
-            is_env_shadowed(k)
-            for k in (
-                "MCP_SERVER_URL",
-                "MCP_TOKEN",
-                "MCP_HEALTH_URL",
-                "VERBOSE",
-                "MCP_TOOL_TIMEOUT",
-            )
-        )
+        any_global_shadowed = any(is_env_shadowed(k) for k in profiles.GLOBAL_FIELDS)
 
         console.print()
         console.print("[bold underline]Configuration[/bold underline]")
         console.print()
         console.print(
+            f"  [bold]Active:[/bold] [cyan]{active_profile}[/cyan] / [cyan]{active_env}[/cyan]"
+        )
+        console.print()
+        console.print(
+            f"  [bold]Per-environment settings[/bold] [dim]({active_profile} / {active_env})[/dim]"
+        )
+        console.print(
             f"  [bold cyan]1.[/bold cyan] MCP_SERVER_URL:    "
-            f"{config.MCP_SERVER_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_SERVER_URL')}"
+            f"{env_dict.get('MCP_SERVER_URL') or '[dim]Not set[/dim]'}"
         )
         console.print(
             f"  [bold cyan]2.[/bold cyan] MCP_HEALTH_URL:    "
-            f"{config.MCP_HEALTH_URL or '[dim]Not set[/dim]'}{_env_tag('MCP_HEALTH_URL')} "
-            f"[dim](optional — enables wake-up for suspended servers)[/dim]"
+            f"{env_dict.get('MCP_HEALTH_URL') or '[dim]Not set[/dim]'} "
+            f"{_PER_ENV_FIELD_LABELS['MCP_HEALTH_URL'][1]}"
         )
-        console.print(
-            f"  [bold cyan]3.[/bold cyan] MCP_TOKEN:         {token_display}{_env_tag('MCP_TOKEN')}"
-        )
+        console.print(f"  [bold cyan]3.[/bold cyan] MCP_TOKEN:         {token_display}")
+        console.print()
+        console.print("  [bold]Globals[/bold]")
         console.print(
             f"  [bold cyan]4.[/bold cyan] VERBOSE:           {verbose_display}{_env_tag('VERBOSE')}"
         )
         console.print(
             f"  [bold cyan]5.[/bold cyan] MCP_TOOL_TIMEOUT:  "
             f"{config.MCP_TOOL_TIMEOUT:g}s{_env_tag('MCP_TOOL_TIMEOUT')} "
-            f"[dim](max time to wait for a tool call to complete)[/dim]"
+            f"{_GLOBAL_FIELD_LABELS['MCP_TOOL_TIMEOUT'][1]}"
         )
         console.print()
-        console.print(f"  [dim]Config file: {CONFIG_FILE}[/dim]")
-        if any_shadowed:
+        console.print(f"  [dim]Profiles file: {profiles.PROFILES_FILE}[/dim]")
+        if any_global_shadowed:
             console.print(
                 "  [dim][yellow](env)[/yellow] = overridden by environment / .env "
-                "(edits apply this session, but env still wins on next launch)[/dim]"
+                "(globals only — connection fields come from the active profile)[/dim]"
             )
         console.print()
 
         display_commands(
             [
                 ("number", "Edit field"),
+                ("p", "Switch / manage profiles & environments"),
                 ("b", "Back"),
             ]
         )
 
         choice = Prompt.ask("Choice").strip().lower()
         if choice in ("", "b", "back"):
-            return changed
+            return needs_reconnect
+
+        if choice == "p":
+            result = pick_profile_and_environment()
+            if result is not None:
+                old = (active_profile, active_env)
+                if result != old:
+                    reload_config()
+                    needs_reconnect = True
+                    console.print(f"[green]  Switched to {result[0]}/{result[1]}.[/green]")
+            continue
 
         # Field 4 (VERBOSE) is a toggle, not an editable string.
         if choice == "4":
             _toggle_verbose()
             continue
 
-        # Map menu numbers to (env-var key, human label).
-        # Field 4 (VERBOSE) is handled above as a toggle.
-        keys = {
-            "1": ("MCP_SERVER_URL", "MCP Server URL"),
-            "2": ("MCP_HEALTH_URL", "Health Check URL"),
-            "3": ("MCP_TOKEN", "MCP Token"),
-            "5": ("MCP_TOOL_TIMEOUT", "Tool timeout (seconds)"),
-        }
-
-        if choice not in keys:
-            console.print("[red]Invalid choice.[/red]")
+        if choice in ("1", "2", "3"):
+            key = ["MCP_SERVER_URL", "MCP_HEALTH_URL", "MCP_TOKEN"][int(choice) - 1]
+            if _edit_per_env_field(key):
+                needs_reconnect = True
             continue
 
-        # Inner sub-menu: edit a single field (set / clear / back).
-        key, label = keys[choice]
-        current = config.get_setting(key) or ""
+        if choice == "5":
+            _edit_global_field("MCP_TOOL_TIMEOUT")
+            # Timeout change applies on the next tool call without a
+            # reconnect — module-level constant is read each call.
+            continue
 
-        console.print()
-        console.print(f"[bold]Editing {key}[/bold]")
-        if current:
-            display = current[:60] + ("..." if len(current) > 60 else "")
-            console.print(f"  [dim]Current: {display}[/dim]")
-        else:
-            console.print("  [dim]Current: [italic]not set[/italic][/dim]")
-        console.print()
+        console.print("[red]Invalid choice.[/red]")
 
-        sub_commands = [("Enter", "Set a new value")]
-        if current:
-            sub_commands.append(("x", "Clear"))
-        sub_commands.append(("b", "Back"))
-        display_commands(sub_commands)
 
-        action = Prompt.ask("Choice").strip().lower()
+def _edit_per_env_field(key: str) -> bool:
+    """Edit a per-environment field on the active environment. Returns
+    True if the value actually changed."""
+    label, _hint = _PER_ENV_FIELD_LABELS[key]
+    doc = profiles.load_profiles()
+    try:
+        env_dict = profiles.get_active_environment(doc)
+    except Exception:
+        console.print("[red]  No active environment.[/red]")
+        return False
+    current = env_dict.get(key) or ""
 
-        if action in ("b", "back"):
+    console.print()
+    console.print(f"[bold]Editing {key}[/bold]")
+    if current:
+        display = current[:60] + ("..." if len(current) > 60 else "")
+        console.print(f"  [dim]Current: {display}[/dim]")
+    else:
+        console.print("  [dim]Current: [italic]not set[/italic][/dim]")
+    console.print()
+
+    sub_commands = [("Enter", "Set a new value")]
+    if current:
+        sub_commands.append(("x", "Clear"))
+    sub_commands.append(("b", "Back"))
+    display_commands(sub_commands)
+
+    action = Prompt.ask("Choice").strip().lower()
+    if action in ("b", "back"):
+        console.print("[dim]  No change.[/dim]")
+        return False
+
+    if action == "":
+        new_value = input(f"  {label}: ").strip()
+        if not new_value:
             console.print("[dim]  No change.[/dim]")
-            continue
+            return False
+        env_dict[key] = new_value
+    elif action == "x" and current:
+        env_dict.pop(key, None)
+    else:
+        console.print("[red]  Invalid choice.[/red]")
+        return False
 
-        if action == "":
-            new_value = input(f"  {label}: ").strip()
-            if not new_value:
-                console.print("[dim]  No change.[/dim]")
-                continue
-            # Numeric fields validate at edit time so the user sees the
-            # error immediately, instead of silently falling back to the
-            # default at parse time after they save.
-            if key == "MCP_TOOL_TIMEOUT":
-                try:
-                    parsed = float(new_value)
-                except ValueError:
-                    console.print(f"[red]  Invalid number: {new_value}[/red]")
-                    continue
-                if parsed <= 0:
-                    console.print("[red]  Tool timeout must be greater than zero.[/red]")
-                    continue
-            cfg = load_config()
-            cfg[key] = new_value
-        elif action == "x" and current:
-            cfg = load_config()
-            cfg.pop(key, None)
-        else:
-            console.print("[red]  Invalid choice.[/red]")
-            continue
+    if profiles.save_profiles(doc):
+        reload_config()
+        console.print(f"[green]  Updated {key}.[/green]")
+        return True
+    return False
 
-        if save_config(cfg):
-            # Drop any env-var shadow so the just-saved value applies this session.
-            # The .env file (if any) still wins on next launch.
-            os.environ.pop(key, None)
-            reload_config()
-            console.print(f"[green]  Updated {key}.[/green]")
-            changed = True  # Caller uses this to decide whether to reconnect.
-        else:
-            console.print("[red]  Failed to save setting.[/red]")
+
+def _edit_global_field(key: str) -> bool:
+    """Edit a global field. Returns True if the value changed."""
+    label, _hint = _GLOBAL_FIELD_LABELS[key]
+    doc = profiles.load_profiles()
+    current = profiles.get_global(doc, key) or ""
+
+    console.print()
+    console.print(f"[bold]Editing {key}[/bold]")
+    if current:
+        console.print(f"  [dim]Current: {current}[/dim]")
+    else:
+        console.print("  [dim]Current: [italic]not set (using default)[/italic][/dim]")
+    console.print()
+
+    sub_commands = [("Enter", "Set a new value")]
+    if current:
+        sub_commands.append(("x", "Clear (revert to default)"))
+    sub_commands.append(("b", "Back"))
+    display_commands(sub_commands)
+
+    action = Prompt.ask("Choice").strip().lower()
+    if action in ("b", "back"):
+        console.print("[dim]  No change.[/dim]")
+        return False
+
+    if action == "":
+        new_value = input(f"  {label}: ").strip()
+        if not new_value:
+            console.print("[dim]  No change.[/dim]")
+            return False
+        if key == "MCP_TOOL_TIMEOUT":
+            try:
+                parsed = float(new_value)
+            except ValueError:
+                console.print(f"[red]  Invalid number: {new_value}[/red]")
+                return False
+            if parsed <= 0:
+                console.print("[red]  Tool timeout must be greater than zero.[/red]")
+                return False
+        profiles.set_global(doc, key, new_value)
+    elif action == "x" and current:
+        profiles.set_global(doc, key, None)
+    else:
+        console.print("[red]  Invalid choice.[/red]")
+        return False
+
+    if profiles.save_profiles(doc):
+        os.environ.pop(key, None)
+        reload_config()
+        console.print(f"[green]  Updated {key}.[/green]")
+        return True
+    return False
 
 
 def confirm_or_edit_config() -> bool:
@@ -246,6 +326,7 @@ def confirm_or_edit_config() -> bool:
                 ("Enter", "Connect"),
                 ("v", f"Toggle verbose logging (currently: {verbose_state})"),
                 ("c", "Change configuration"),
+                ("p", "Switch profile / environment"),
                 ("q", "Quit"),
             ]
         )
@@ -261,6 +342,10 @@ def confirm_or_edit_config() -> bool:
             continue
         if choice == "c":
             handle_config_command()
+            continue
+        if choice == "p":
+            if pick_profile_and_environment() is not None:
+                reload_config()
             continue
         console.print("[red]Invalid choice.[/red]")
         # Loops back via while True; the unreachable return below proves
@@ -330,6 +415,40 @@ async def reconnect(old_session: MCPSession | None) -> tuple[MCPSession | None, 
     return mcp_session, tools
 
 
+def _launch_setup() -> bool:
+    """Shared launch sequence: migrate legacy config, run wizard if first
+    launch, and show the picker when the user has more than one
+    profile/environment to choose between.
+
+    Returns False if the user quits the picker; True otherwise. Caller
+    falls through to the config gate either way (gate handles the
+    True case, returns immediately on False)."""
+    migrate_legacy_config_if_needed()
+    if is_first_run():
+        run_first_time_setup()
+    reload_config()
+
+    # --profile / --env flags pin the selection at the async_main layer
+    # via set_active_override. Skip the picker so a scripted run doesn't
+    # block on a TTY prompt.
+    if config._OVERRIDE_PROFILE:
+        return True
+
+    # Skip the picker entirely for the single-profile / single-env case
+    # so existing users see no UX change. Multi-profile or multi-env
+    # users get the picker on every launch.
+    doc = profiles.load_profiles()
+    profile_count = len(doc.get("profiles", {}))
+    env_count = (
+        len(profiles.list_environments(doc, profiles.get_active(doc)[0])) if profile_count else 0
+    )
+    if profile_count > 1 or env_count > 1:
+        if pick_profile_and_environment() is None:
+            return False
+        reload_config()
+    return True
+
+
 async def test_connectivity() -> bool:
     """Test connectivity to the MCP server. Returns True on success, False otherwise.
 
@@ -342,9 +461,8 @@ async def test_connectivity() -> bool:
     listener_task: asyncio.Task | None = None
     try:
         display_logo()
-        # First-time setup before the gate so a fresh user has values to confirm.
-        if is_first_run():
-            run_first_time_setup()
+        if not _launch_setup():
+            return False
         if not confirm_or_edit_config():
             return False
 
@@ -434,10 +552,8 @@ async def interactive_session():
 
     try:
         display_logo()
-
-        # First run: kick off the setup wizard so the user has somewhere to start.
-        if is_first_run():
-            run_first_time_setup()
+        if not _launch_setup():
+            return
 
         # Always show the config gate so the user can confirm or edit before connecting.
         # The gate blocks "connect" when required fields are missing.
@@ -481,6 +597,7 @@ async def interactive_session():
                     ("number", "Select a tool"),
                     ("v", f"Toggle verbose logging (currently: {verbose_state})"),
                     ("c", "Change configuration"),
+                    ("p", "Switch profile / environment"),
                     ("q", "Quit"),
                 ]
             )
@@ -508,6 +625,22 @@ async def interactive_session():
                         console.print(
                             "[yellow]Reconnection failed. Keeping current connection.[/yellow]\n"
                         )
+                continue
+
+            if choice == "p":
+                old_active = (config.ACTIVE_PROFILE, config.ACTIVE_ENV)
+                if pick_profile_and_environment() is not None:
+                    reload_config()
+                    if (config.ACTIVE_PROFILE, config.ACTIVE_ENV) != old_active:
+                        new_session, new_tools = await reconnect(mcp_session)
+                        if new_session:
+                            mcp_session = new_session
+                            tools = new_tools
+                        else:
+                            console.print(
+                                "[yellow]Reconnection failed. Keeping current connection — "
+                                "the active profile changed but the running session has not.[/yellow]\n"
+                            )
                 continue
 
             # Anything else: treat as a 1-indexed tool selection.
@@ -560,9 +693,25 @@ async def interactive_session():
                                 # may have changed under the new connection.
                                 break
 
+                        elif tool_choice == "p":
+                            old_active = (config.ACTIVE_PROFILE, config.ACTIVE_ENV)
+                            if pick_profile_and_environment() is not None:
+                                reload_config()
+                                if (config.ACTIVE_PROFILE, config.ACTIVE_ENV) != old_active:
+                                    new_session, new_tools = await reconnect(mcp_session)
+                                    if new_session:
+                                        mcp_session = new_session
+                                        tools = new_tools
+                                    else:
+                                        console.print(
+                                            "[yellow]Reconnection failed. Keeping current connection.[/yellow]\n"
+                                        )
+                                    # Profile changed; tool set may differ — drop back to list.
+                                    break
+
                         else:
                             console.print(
-                                "[red]Invalid option. Use 'd' for details, 'r' to run, 'b' to go back, or 'q' to quit.[/red]\n"
+                                "[red]Invalid option. Use 'd' for details, 'r' to run, 'p' to switch profile, 'b' to go back, or 'q' to quit.[/red]\n"
                             )
                 else:
                     console.print(
@@ -586,6 +735,96 @@ async def interactive_session():
             await mcp_session.cleanup()
 
 
+def _build_arg_parser() -> "argparse.ArgumentParser":
+    import argparse as _argparse
+
+    parser = _argparse.ArgumentParser(
+        prog="forbin",
+        description="Interactive CLI for testing remote MCP servers.",
+        add_help=False,  # we render our own help to keep the logo + theming
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--test", "-t", action="store_true", help="Test connectivity and exit")
+    mode.add_argument("--config", "-c", action="store_true", help="Open the config editor")
+    mode.add_argument("--help", "-h", action="store_true", help="Show this help and exit")
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Use this profile for the run (does not persist as the active profile)",
+    )
+    parser.add_argument(
+        "--env",
+        metavar="NAME",
+        help="Use this environment within the chosen profile",
+    )
+    return parser
+
+
+def _resolve_flag_overrides(profile_arg: Optional[str], env_arg: Optional[str]) -> Optional[int]:
+    """Apply --profile/--env to the in-memory active pointer.
+
+    Returns an exit code on validation failure (so the caller can return
+    it directly), or ``None`` if everything checks out and the launch
+    sequence should proceed.
+    """
+    if not profile_arg and not env_arg:
+        return None
+    if env_arg and not profile_arg:
+        console.print("[red]--env requires --profile.[/red]")
+        return 2
+
+    doc = profiles.load_profiles()
+    available = profiles.list_profiles(doc)
+    if profile_arg not in available:
+        console.print(
+            f"[red]Unknown profile {profile_arg!r}.[/red] "
+            f"Available: {', '.join(available) or '(none)'}"
+        )
+        return 2
+
+    envs = profiles.list_environments(doc, profile_arg)
+    if env_arg is None:
+        if len(envs) > 1:
+            console.print(
+                f"[red]--profile {profile_arg!r} has multiple environments "
+                f"({', '.join(envs)}); pass --env to disambiguate.[/red]"
+            )
+            return 2
+        env_arg = envs[0]
+    elif env_arg not in envs:
+        console.print(
+            f"[red]Unknown environment {env_arg!r} in profile {profile_arg!r}.[/red] "
+            f"Available: {', '.join(envs)}"
+        )
+        return 2
+
+    config.set_active_override(profile_arg, env_arg)
+    reload_config()
+    return None
+
+
+def _print_help() -> None:
+    display_logo()
+    console.print("\n[bold]Usage:[/bold]")
+    console.print("  forbin                       Run interactive session")
+    console.print("  forbin --test                Test connectivity (exits non-zero on failure)")
+    console.print("  forbin --config              Open the config editor")
+    console.print("  forbin --profile X --env Y   Pin profile/environment for this run")
+    console.print("  forbin --help                Show this help message")
+    console.print("\n[bold]Configuration:[/bold]")
+    console.print(f"  Profiles file: {profiles.PROFILES_FILE}")
+    console.print("  Connection fields come from the active profile's environment.")
+    console.print("  Globals (VERBOSE, MCP_TOOL_TIMEOUT) can still be overridden via env / .env.")
+    console.print("\n[bold]Interactive Shortcuts:[/bold]")
+    console.print("  [bold cyan]'v'[/bold cyan]   - Toggle verbose logging at any time")
+    console.print(
+        "  [bold cyan]'c'[/bold cyan]   - View/update configuration (in menu) "
+        "or copy last response (after a tool call)"
+    )
+    console.print("  [bold cyan]'p'[/bold cyan]   - Switch profile / environment")
+    console.print("  [bold cyan]ESC[/bold cyan]   - Cancel a running tool call")
+
+
 async def async_main() -> int:
     """Async main entry point. Returns the process exit code.
 
@@ -598,37 +837,40 @@ async def async_main() -> int:
     setup_logging()
 
     try:
-        # Subcommand dispatch: --test, --config, --help, or fall through to interactive.
-        if len(sys.argv) > 1:
-            if sys.argv[1] in ("--test", "-t"):
-                ok = await test_connectivity()
-                return 0 if ok else 1
-            elif sys.argv[1] in ("--config", "-c"):
-                display_logo()
-                run_first_time_setup()
-                return 0
-            elif sys.argv[1] in ("--help", "-h"):
-                display_logo()
-                console.print("\n[bold]Usage:[/bold]")
-                console.print("  forbin            Run interactive session")
-                console.print(
-                    "  forbin --test     Test connectivity only (exits non-zero on failure)"
-                )
-                console.print("  forbin --config   Run configuration wizard")
-                console.print("  forbin --help     Show this help message")
-                console.print("\n[bold]Configuration:[/bold]")
-                console.print(f"  Config file: {CONFIG_FILE}")
-                console.print("  Settings can also be set via .env file or environment variables")
-                console.print("  Priority: .env / environment > ~/.forbin/config.json")
-                console.print("\n[bold]Interactive Shortcuts:[/bold]")
-                console.print("  [bold cyan]'v'[/bold cyan]   - Toggle verbose logging at any time")
-                console.print(
-                    "  [bold cyan]'c'[/bold cyan]   - View/update configuration (in menu) or copy last response (after a tool call)"
-                )
-                console.print("  [bold cyan]ESC[/bold cyan]   - Cancel a running tool call")
-                return 0
+        parser = _build_arg_parser()
+        args = parser.parse_args(sys.argv[1:])
 
-        # Run interactive session by default
+        if args.help:
+            _print_help()
+            return 0
+
+        # Migration runs before flag validation so --profile can reference
+        # a freshly-imported profile from a legacy config.json.
+        migrate_legacy_config_if_needed()
+
+        if args.profile or args.env:
+            if args.config:
+                console.print(
+                    "[yellow]--profile / --env are ignored with --config "
+                    "(switch from inside the editor instead).[/yellow]"
+                )
+            else:
+                code = _resolve_flag_overrides(args.profile, args.env)
+                if code is not None:
+                    return code
+
+        if args.test:
+            ok = await test_connectivity()
+            return 0 if ok else 1
+        if args.config:
+            display_logo()
+            if is_first_run():
+                run_first_time_setup()
+            else:
+                reload_config()
+            handle_config_command()
+            return 0
+
         await interactive_session()
         return 0
     except asyncio.CancelledError:
