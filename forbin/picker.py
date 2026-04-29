@@ -31,15 +31,15 @@ def pick_profile_and_environment() -> Optional[tuple[str, str]]:
         # Re-load: _pick_profile may have mutated/saved.
         doc = profiles.load_profiles()
         envs = profiles.list_environments(doc, chosen_profile)
-        chosen_env: Optional[str]
         if len(envs) == 1:
             # Single-env profile: skip the env picker entirely.
             chosen_env = envs[0]
         else:
-            chosen_env = _pick_environment(doc, chosen_profile)
-            if chosen_env is None:
+            picked = _pick_environment(doc, chosen_profile)
+            if picked is None:
                 # User backed out of env picker — go back to profile list.
                 continue
+            chosen_env = picked
 
         # Persist active pointer.
         doc = profiles.load_profiles()

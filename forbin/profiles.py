@@ -14,7 +14,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from .config import FORBIN_DIR, ensure_forbin_dir
 
@@ -93,7 +93,7 @@ def load_profiles() -> dict:
                 f"[yellow]Warning: profiles file was malformed ({e}); "
                 f"backed up to {backup} and starting fresh.[/yellow]"
             )
-        except Exception:
+        except OSError:
             console.print(
                 f"[yellow]Warning: could not load profiles file ({e}); starting fresh.[/yellow]"
             )
@@ -106,7 +106,7 @@ def load_profiles() -> dict:
         backup = _backup_path("invalid")
         try:
             os.replace(PROFILES_FILE, backup)
-        except Exception:
+        except OSError:
             pass
         console.print(
             f"[yellow]Warning: profiles file failed validation ({why}); "
@@ -188,8 +188,8 @@ def _repair_active_pointer(doc: dict) -> dict:
     if p in profiles and e in profiles[p]["environments"]:
         return doc
 
-    fallback_profile = sorted(profiles.keys())[0]
-    fallback_env = sorted(profiles[fallback_profile]["environments"].keys())[0]
+    fallback_profile = cast(str, sorted(profiles.keys())[0])
+    fallback_env = cast(str, sorted(profiles[fallback_profile]["environments"].keys())[0])
     doc["active"] = {"profile": fallback_profile, "environment": fallback_env}
 
     from .display import console

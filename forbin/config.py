@@ -69,7 +69,7 @@ def get_setting(key: str, default: str = "") -> str:
         try:
             doc = profiles.load_profiles()
             env_dict = profiles.get_active_environment(doc)
-        except Exception:
+        except (profiles.ProfileError, KeyError):
             return default
         val = env_dict.get(key)
         return str(val) if val else default
@@ -81,7 +81,7 @@ def get_setting(key: str, default: str = "") -> str:
     try:
         doc = profiles.load_profiles()
         val = profiles.get_global(doc, key)
-    except Exception:
+    except (profiles.ProfileError, KeyError):
         val = None
     return val if val else default
 
@@ -182,7 +182,7 @@ def reload_config():
             active_profile, active_env = profiles.get_active(doc)
         env_dict = doc["profiles"][active_profile]["environments"][active_env]
         ACTIVE_PROFILE, ACTIVE_ENV = active_profile, active_env
-    except Exception:
+    except (profiles.ProfileError, KeyError):
         env_dict = {}
         doc = profiles.default_profiles_doc()
         ACTIVE_PROFILE, ACTIVE_ENV = ("default", "default")

@@ -1,4 +1,4 @@
-<p align="left">
+<p>
   <img src="https://raw.githubusercontent.com/chris-colinsky/forbin-mcp/main/img/forbin_avatar.jpg" alt="Forbin Logo" width="200">
 </p>
 
@@ -161,31 +161,34 @@ This will:
 5. Enter the two-level interactive browser
 
 **Tool List View:**
-```
+
+```text
 Available Tools
 
    1. generate_report - Generates a monthly summary report...
    2. get_user_stats - Retrieves user statistics for a given...
 
 Commands:
-  number - Select a tool
-  v      - Toggle verbose logging (current: OFF)
-  q      - Quit
-
-Select tool: 1
+  [number] - Select a tool
+  [v]      - Toggle verbose logging (currently: OFF)
+  [c]      - Change configuration
+  [p]      - Switch profile / environment
+  [q]      - Quit
 ```
 
 **Tool View:**
-```
+
+```text
 ─────────────────────────── generate_report ───────────────────────────
 
-Options:
-  d - View details
-  r - Run tool
-  b - Back to tool list
-  q - Quit
-
-Choose option:
+Commands:
+  [d] - View details
+  [r] - Run tool
+  [v] - Toggle verbose logging (currently: OFF)
+  [c] - Change configuration
+  [p] - Switch profile / environment
+  [b] - Back to tool list
+  [q] - Quit
 ```
 
 From the tool view you can:
@@ -212,12 +215,18 @@ This is useful for:
 - Validating authentication tokens
 - CI/CD health checks
 
-### Config Wizard
+### Config Editor
 
-Re-run the first-time setup wizard at any time:
+Open the in-app config editor at any time to edit the active environment, switch profiles, or manage profile/environment CRUD:
 
 ```bash
 forbin --config
+```
+
+Or pin a target for a single invocation (useful in CI):
+
+```bash
+forbin --profile staging --env eu-west --test
 ```
 
 ### Help
@@ -257,7 +266,7 @@ While a tool call is in flight, press **`ESC`** to cancel it. You stay in the to
 
 ### Terminal Compatibility
 
-Forbin's single-key shortcuts (`v`, `c`, `ESC`-to-cancel, post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. That has a few practical implications:
+Forbin's single-key shortcuts (`v`, `c`, `p`, `ESC`-to-cancel, post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. That has a few practical implications:
 
 - **macOS and Linux** — fully supported in any modern terminal (Terminal.app, iTerm2, Alacritty, GNOME Terminal, Konsole, etc.).
 - **Native Windows** — `termios` isn't available, so the single-key shortcuts silently no-op. Numbered tool selection, prompts, and tool execution still work, but you won't be able to toggle verbose mid-run, cancel a hanging tool with `ESC`, or use the one-key clipboard prompt. **Run Forbin under [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)** for the full experience.
@@ -268,20 +277,22 @@ Forbin's single-key shortcuts (`v`, `c`, `ESC`-to-cancel, post-call clipboard pr
 
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — full health-URL strategy, timeout knobs, and troubleshooting tables.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — internal package layout, connection lifecycle, and error-handling plumbing.
-- [docs/](docs/) — index of all long-form documentation.
+- [docs/README.md](docs/README.md) — index of all long-form documentation.
 
 ## Development
 
 ### Project Structure
 
-```
+```text
 forbin/
  forbin/              # Package directory
    __init__.py
    __main__.py        # python -m forbin entry point
    cli.py             # Main CLI application
    client.py          # MCP connection + wake-up
-   config.py          # Configuration + first-run wizard
+   config.py          # Module-level globals, env shadowing, legacy migration
+   profiles.py        # profiles.json schema, load/save, profile + env CRUD
+   picker.py          # Profile/environment picker UI
    display.py         # Rich-based UI primitives
    tools.py           # Parameter parsing + tool calls
    utils.py           # FilteredStderr + key listeners
@@ -322,8 +333,11 @@ This tool is designed to work with FastAPI servers using the FastMCP library. Yo
 4. Follow the MCP protocol specification
 
 **Example FastAPI/FastMCP server:**
+
 ```python
+# noinspection PyUnresolvedReferences
 from fastapi import FastAPI
+# noinspection PyUnresolvedReferences
 from fastmcp import FastMCP
 
 app = FastAPI()
