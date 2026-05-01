@@ -30,10 +30,14 @@ def _drive(inputs):
     return patch("forbin.picker.Prompt.ask", side_effect=fake)
 
 
-def test_selecting_single_env_profile_skips_env_picker(seeded_profiles):
-    """Picking the 'default' profile (1 env) should immediately return."""
-    # Profile list (alphabetical): default, staging.
-    with _drive(["1"]):  # pick 'default'
+def test_selecting_single_env_profile_still_shows_env_picker(seeded_profiles):
+    """Even when a profile has only one environment, the env picker
+    renders so the user can manage (rename / delete / add) it. The
+    launch flow skips the whole picker for single-profile/single-env
+    setups separately — see _launch_setup."""
+    # Profile list (alphabetical): default, staging. Pick 'default' (1 env),
+    # then accept the only env (idx 1).
+    with _drive(["1", "1"]):
         result = picker.pick_profile_and_environment()
     assert result == ("default", "default")
 
@@ -57,18 +61,16 @@ def test_back_at_env_picker_returns_to_profiles(seeded_profiles):
 
 
 def test_invalid_input_loops_at_profile_picker(seeded_profiles):
-    # 'xyz' is invalid; then '99' is out of range; then '1' picks default.
-    with _drive(["xyz", "99", "1"]):
+    # 'xyz' is invalid; '99' is out of range; '1' picks default; '1' picks env.
+    with _drive(["xyz", "99", "1", "1"]):
         result = picker.pick_profile_and_environment()
     assert result == ("default", "default")
 
 
 def test_create_profile_persists_and_lets_you_pick_it(seeded_profiles):
-    # 'n' → name → seed env name → ENTER picks the new profile.
-    # New profile has 1 env so env picker is skipped.
-    with _drive(["n", "production", "primary", "2"]):
-        # After creating 'production', list becomes: default, production, staging.
-        # Pick idx 2 = production.
+    # 'n' → name → seed env name. After creating 'production', list becomes:
+    # default, production, staging. Pick idx 2 = production, then env idx 1.
+    with _drive(["n", "production", "primary", "2", "1"]):
         result = picker.pick_profile_and_environment()
     assert result == ("production", "primary")
     doc = profiles.load_profiles()

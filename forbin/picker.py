@@ -17,6 +17,7 @@ from rich.prompt import Prompt
 
 from . import profiles
 from .display import console, display_commands
+from .utils import UserQuit
 
 
 def pick_profile_and_environment() -> Optional[tuple[str, str]]:
@@ -28,18 +29,19 @@ def pick_profile_and_environment() -> Optional[tuple[str, str]]:
         if chosen_profile is None:
             return None
 
-        # Re-load: _pick_profile may have mutated/saved.
+        # Always drop into the env picker — even for single-env profiles —
+        # so the user can rename, add, or delete environments. The earlier
+        # auto-skip optimisation made env CRUD undiscoverable for any
+        # profile with only one environment. The launch path still skips
+        # the picker entirely when there's nothing to choose between (see
+        # _launch_setup), so this only adds a keystroke for users who
+        # genuinely have multiple profiles or environments to navigate.
         doc = profiles.load_profiles()
-        envs = profiles.list_environments(doc, chosen_profile)
-        if len(envs) == 1:
-            # Single-env profile: skip the env picker entirely.
-            chosen_env = envs[0]
-        else:
-            picked = _pick_environment(doc, chosen_profile)
-            if picked is None:
-                # User backed out of env picker — go back to profile list.
-                continue
-            chosen_env = picked
+        picked = _pick_environment(doc, chosen_profile)
+        if picked is None:
+            # User backed out of env picker — go back to profile list.
+            continue
+        chosen_env = picked
 
         # Persist active pointer.
         doc = profiles.load_profiles()
@@ -72,12 +74,15 @@ def _pick_profile(doc: dict) -> Optional[str]:
                 ("r", "Rename a profile"),
                 ("d", "Delete a profile"),
                 ("b", "Back / cancel"),
+                ("q", "Quit"),
             ]
         )
 
         choice = Prompt.ask("Choice").strip().lower()
         if choice in ("", "b", "back"):
             return None
+        if choice in ("q", "quit", "exit"):
+            raise UserQuit
 
         if choice == "n":
             new_name = _create_profile(doc)
@@ -129,12 +134,15 @@ def _pick_environment(doc: dict, profile: str) -> Optional[str]:
                 ("r", "Rename an environment"),
                 ("d", "Delete an environment"),
                 ("b", "Back to profiles"),
+                ("q", "Quit"),
             ]
         )
 
         choice = Prompt.ask("Choice").strip().lower()
         if choice in ("", "b", "back"):
             return None
+        if choice in ("q", "quit", "exit"):
+            raise UserQuit
 
         if choice == "n":
             if _create_environment(doc, profile):
@@ -167,12 +175,21 @@ def _pick_environment(doc: dict, profile: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+_RESERVED_MENU_SHORTCUTS = {"n", "r", "d", "b", "q"}
+
+
 def _prompt_name(label: str) -> Optional[str]:
     """Prompt for a name, validating against the schema's name regex.
     Returns None if the user enters an empty name (treated as cancel)."""
     raw = Prompt.ask(f"  {label}").strip()
     if not raw:
         console.print("[dim]  No change.[/dim]")
+        return None
+    if raw.lower() in _RESERVED_MENU_SHORTCUTS:
+        # The picker dispatches single letters as menu actions, so a
+        # name like "n" is almost certainly a fat-finger. Refuse it
+        # rather than silently saving a confusing identifier.
+        console.print(f"[red]  {raw!r} is a menu shortcut — pick a longer or different name.[/red]")
         return None
     if not profiles.is_valid_name(raw):
         console.print("[red]  Invalid name. Use letters, digits, underscore, dot, or hyphen.[/red]")

@@ -19,7 +19,7 @@ from .config import (
     migrate_legacy_config_if_needed,
 )
 from .picker import pick_profile_and_environment
-from .utils import setup_logging, listen_for_toggle
+from .utils import setup_logging, listen_for_toggle, UserQuit
 from .client import MCPSession, connect_and_list_tools, wake_up_server
 from .tools import get_tool_parameters, call_tool
 from .verbose import vlog_timing
@@ -143,12 +143,15 @@ def handle_config_command() -> bool:
                 ("number", "Edit field"),
                 ("p", "Switch / manage profiles & environments"),
                 ("b", "Back"),
+                ("q", "Quit"),
             ]
         )
 
         choice = Prompt.ask("Choice").strip().lower()
         if choice in ("", "b", "back"):
             return needs_reconnect
+        if choice in ("q", "quit", "exit"):
+            raise UserQuit
 
         if choice == "p":
             result = pick_profile_and_environment()
@@ -187,7 +190,7 @@ def _edit_per_env_field(key: str) -> bool:
     doc = profiles.load_profiles()
     try:
         env_dict = profiles.get_active_environment(doc)
-    except Exception:
+    except (profiles.ProfileError, KeyError):
         console.print("[red]  No active environment.[/red]")
         return False
     current = env_dict.get(key) or ""
@@ -201,28 +204,41 @@ def _edit_per_env_field(key: str) -> bool:
         console.print("  [dim]Current: [italic]not set[/italic][/dim]")
     console.print()
 
-    sub_commands = [("Enter", "Set a new value")]
-    if current:
-        sub_commands.append(("x", "Clear"))
-    sub_commands.append(("b", "Back"))
-    display_commands(sub_commands)
-
-    action = Prompt.ask("Choice").strip().lower()
-    if action in ("b", "back"):
-        console.print("[dim]  No change.[/dim]")
-        return False
-
-    if action == "":
-        new_value = input(f"  {label}: ").strip()
+    if not current:
+        # No current value — the [Enter]/[x]/[b] sub-menu would have only
+        # one meaningful choice. Go straight to the value prompt; empty
+        # input there is the cancel path.
+        new_value = input(f"  {label} (Enter to cancel): ").strip()
         if not new_value:
             console.print("[dim]  No change.[/dim]")
             return False
         env_dict[key] = new_value
-    elif action == "x" and current:
-        env_dict.pop(key, None)
     else:
-        console.print("[red]  Invalid choice.[/red]")
-        return False
+        display_commands(
+            [
+                ("Enter", "Set a new value"),
+                ("x", "Clear"),
+                ("b", "Back"),
+                ("q", "Quit"),
+            ]
+        )
+        action = Prompt.ask("Choice").strip().lower()
+        if action in ("b", "back"):
+            console.print("[dim]  No change.[/dim]")
+            return False
+        if action in ("q", "quit", "exit"):
+            raise UserQuit
+        if action == "":
+            new_value = input(f"  {label}: ").strip()
+            if not new_value:
+                console.print("[dim]  No change.[/dim]")
+                return False
+            env_dict[key] = new_value
+        elif action == "x":
+            env_dict.pop(key, None)
+        else:
+            console.print("[red]  Invalid choice.[/red]")
+            return False
 
     if profiles.save_profiles(doc):
         reload_config()
@@ -245,37 +261,44 @@ def _edit_global_field(key: str) -> bool:
         console.print("  [dim]Current: [italic]not set (using default)[/italic][/dim]")
     console.print()
 
-    sub_commands = [("Enter", "Set a new value")]
-    if current:
-        sub_commands.append(("x", "Clear (revert to default)"))
-    sub_commands.append(("b", "Back"))
-    display_commands(sub_commands)
-
-    action = Prompt.ask("Choice").strip().lower()
-    if action in ("b", "back"):
-        console.print("[dim]  No change.[/dim]")
-        return False
-
-    if action == "":
-        new_value = input(f"  {label}: ").strip()
+    if not current:
+        # No stored value — skip the sub-menu and go straight to input.
+        # Empty input cancels.
+        new_value = input(f"  {label} (Enter to cancel): ").strip()
         if not new_value:
             console.print("[dim]  No change.[/dim]")
             return False
-        if key == "MCP_TOOL_TIMEOUT":
-            try:
-                parsed = float(new_value)
-            except ValueError:
-                console.print(f"[red]  Invalid number: {new_value}[/red]")
-                return False
-            if parsed <= 0:
-                console.print("[red]  Tool timeout must be greater than zero.[/red]")
-                return False
+        if not _validate_global_value(key, new_value):
+            return False
         profiles.set_global(doc, key, new_value)
-    elif action == "x" and current:
-        profiles.set_global(doc, key, None)
     else:
-        console.print("[red]  Invalid choice.[/red]")
-        return False
+        display_commands(
+            [
+                ("Enter", "Set a new value"),
+                ("x", "Clear (revert to default)"),
+                ("b", "Back"),
+                ("q", "Quit"),
+            ]
+        )
+        action = Prompt.ask("Choice").strip().lower()
+        if action in ("b", "back"):
+            console.print("[dim]  No change.[/dim]")
+            return False
+        if action in ("q", "quit", "exit"):
+            raise UserQuit
+        if action == "":
+            new_value = input(f"  {label}: ").strip()
+            if not new_value:
+                console.print("[dim]  No change.[/dim]")
+                return False
+            if not _validate_global_value(key, new_value):
+                return False
+            profiles.set_global(doc, key, new_value)
+        elif action == "x":
+            profiles.set_global(doc, key, None)
+        else:
+            console.print("[red]  Invalid choice.[/red]")
+            return False
 
     if profiles.save_profiles(doc):
         os.environ.pop(key, None)
@@ -283,6 +306,21 @@ def _edit_global_field(key: str) -> bool:
         console.print(f"[green]  Updated {key}.[/green]")
         return True
     return False
+
+
+def _validate_global_value(key: str, value: str) -> bool:
+    """Inline validation for global fields. Prints an error and returns
+    False on failure."""
+    if key == "MCP_TOOL_TIMEOUT":
+        try:
+            parsed = float(value)
+        except ValueError:
+            console.print(f"[red]  Invalid number: {value}[/red]")
+            return False
+        if parsed <= 0:
+            console.print("[red]  Tool timeout must be greater than zero.[/red]")
+            return False
+    return True
 
 
 def confirm_or_edit_config() -> bool:
@@ -304,6 +342,7 @@ def confirm_or_edit_config() -> bool:
                 [
                     ("Enter", "Edit configuration"),
                     ("v", f"Toggle verbose logging (currently: {verbose_state})"),
+                    ("b", "Back to profile picker"),
                     ("q", "Quit"),
                 ]
             )
@@ -313,6 +352,10 @@ def confirm_or_edit_config() -> bool:
                 continue
             if choice == "v":
                 _toggle_verbose()
+                continue
+            if choice in ("b", "back"):
+                if pick_profile_and_environment() is not None:
+                    reload_config()
                 continue
             if choice in ("q", "quit", "exit"):
                 console.print("\n[bold yellow]Exiting...[/bold yellow]")
@@ -327,6 +370,7 @@ def confirm_or_edit_config() -> bool:
                 ("v", f"Toggle verbose logging (currently: {verbose_state})"),
                 ("c", "Change configuration"),
                 ("p", "Switch profile / environment"),
+                ("b", "Back to profile picker"),
                 ("q", "Quit"),
             ]
         )
@@ -343,7 +387,7 @@ def confirm_or_edit_config() -> bool:
         if choice == "c":
             handle_config_command()
             continue
-        if choice == "p":
+        if choice in ("p", "b", "back"):
             if pick_profile_and_environment() is not None:
                 reload_config()
             continue
@@ -353,6 +397,30 @@ def confirm_or_edit_config() -> bool:
         # None return, satisfying the `-> bool` annotation.
         continue
     return False  # pragma: no cover - unreachable
+
+
+async def _reconnect_or_warn(
+    old_session: MCPSession | None, old_tools: list
+) -> tuple[MCPSession | None, list]:
+    """Reconnect after a profile/environment switch, but only if the new
+    selection has the fields we need. If MCP_SERVER_URL or MCP_TOKEN is
+    missing, print a clear yellow message and keep the previous session
+    instead of dialing into a half-configured profile (which produces a
+    confusing fastmcp traceback). The user can press `c` to fill in the
+    gaps and reconnect manually."""
+    if not validate_config():
+        console.print(
+            f"[yellow]Profile [bold]{config.ACTIVE_PROFILE}/{config.ACTIVE_ENV}[/bold] "
+            f"is missing required fields (MCP_SERVER_URL and/or MCP_TOKEN). "
+            f"Skipping reconnect — press [bold]c[/bold] to fill them in."
+            f"[/yellow]\n"
+        )
+        return old_session, old_tools
+    new_session, new_tools = await reconnect(old_session)
+    if new_session is None:
+        console.print("[yellow]Reconnection failed. Keeping current connection.[/yellow]\n")
+        return old_session, old_tools
+    return new_session, new_tools
 
 
 async def reconnect(old_session: MCPSession | None) -> tuple[MCPSession | None, list]:
@@ -555,35 +623,43 @@ async def interactive_session():
         if not _launch_setup():
             return
 
-        # Always show the config gate so the user can confirm or edit before connecting.
-        # The gate blocks "connect" when required fields are missing.
-        if not confirm_or_edit_config():
-            return
+        # Loop over (gate -> connect) until we either connect successfully
+        # or the user quits at the gate. A failed connect (bad URL, dead
+        # server, missing credentials) drops the user back at the gate so
+        # they can edit config or switch profile and retry — without
+        # killing the app and losing their place.
+        while True:
+            if not confirm_or_edit_config():
+                return
 
-        # Listener starts AFTER the gate so its cbreak-mode raw stdin reads
-        # don't race with Prompt.ask. The gate / wizard handle `v` themselves;
-        # the listener is only useful during the connect phase below (so the
-        # user can flip verbose mid-flight to debug a hanging connection).
-        listener_task = asyncio.create_task(listen_for_toggle())
+            # Listener starts AFTER the gate so its cbreak-mode raw stdin
+            # reads don't race with Prompt.ask. The gate / wizard handle
+            # `v` themselves; the listener is only useful during the
+            # connect phase (so the user can flip verbose mid-flight to
+            # debug a hanging connection). try/finally guarantees we cancel
+            # before the next gate iteration if the connect fails.
+            listener_task = asyncio.create_task(listen_for_toggle())
+            try:
+                mcp_session, tools = await reconnect(None)
+            finally:
+                listener_task.cancel()
+                try:
+                    await listener_task
+                except asyncio.CancelledError:
+                    pass
+                listener_task = None
 
-        # Initial connection (no prior session to clean up).
-        mcp_session, tools = await reconnect(None)
-
-        if not mcp_session:
-            return
+            if mcp_session:
+                break
+            console.print(
+                "[yellow]Could not connect with the current configuration. "
+                "Press [bold]c[/bold] to edit, [bold]p[/bold] to switch profile, "
+                "Enter to retry, or [bold]q[/bold] to quit.[/yellow]\n"
+            )
 
         if not tools:
             console.print("[yellow]No tools available on this server.[/yellow]")
             return
-
-        # Hand off keyboard input to the interactive loop below — it has its
-        # own 'v' shortcut and shouldn't compete with the background listener.
-        listener_task.cancel()
-        try:
-            await listener_task
-        except asyncio.CancelledError:
-            pass
-        listener_task = None
 
         # Main interaction loop — Tool List View. `running` is the outer escape
         # hatch so a quit from the inner Tool View also exits the outer loop.
@@ -617,14 +693,7 @@ async def interactive_session():
                 # otherwise we'd disconnect for nothing.
                 changed = handle_config_command()
                 if changed:
-                    new_session, new_tools = await reconnect(mcp_session)
-                    if new_session:
-                        mcp_session = new_session
-                        tools = new_tools
-                    else:
-                        console.print(
-                            "[yellow]Reconnection failed. Keeping current connection.[/yellow]\n"
-                        )
+                    mcp_session, tools = await _reconnect_or_warn(mcp_session, tools)
                 continue
 
             if choice == "p":
@@ -632,15 +701,7 @@ async def interactive_session():
                 if pick_profile_and_environment() is not None:
                     reload_config()
                     if (config.ACTIVE_PROFILE, config.ACTIVE_ENV) != old_active:
-                        new_session, new_tools = await reconnect(mcp_session)
-                        if new_session:
-                            mcp_session = new_session
-                            tools = new_tools
-                        else:
-                            console.print(
-                                "[yellow]Reconnection failed. Keeping current connection — "
-                                "the active profile changed but the running session has not.[/yellow]\n"
-                            )
+                        mcp_session, tools = await _reconnect_or_warn(mcp_session, tools)
                 continue
 
             # Anything else: treat as a 1-indexed tool selection.
@@ -681,14 +742,7 @@ async def interactive_session():
                         elif tool_choice == "c":
                             changed = handle_config_command()
                             if changed:
-                                new_session, new_tools = await reconnect(mcp_session)
-                                if new_session:
-                                    mcp_session = new_session
-                                    tools = new_tools
-                                else:
-                                    console.print(
-                                        "[yellow]Reconnection failed. Keeping current connection.[/yellow]\n"
-                                    )
+                                mcp_session, tools = await _reconnect_or_warn(mcp_session, tools)
                                 # Drop back to the tool list — the tool set
                                 # may have changed under the new connection.
                                 break
@@ -698,14 +752,9 @@ async def interactive_session():
                             if pick_profile_and_environment() is not None:
                                 reload_config()
                                 if (config.ACTIVE_PROFILE, config.ACTIVE_ENV) != old_active:
-                                    new_session, new_tools = await reconnect(mcp_session)
-                                    if new_session:
-                                        mcp_session = new_session
-                                        tools = new_tools
-                                    else:
-                                        console.print(
-                                            "[yellow]Reconnection failed. Keeping current connection.[/yellow]\n"
-                                        )
+                                    mcp_session, tools = await _reconnect_or_warn(
+                                        mcp_session, tools
+                                    )
                                     # Profile changed; tool set may differ — drop back to list.
                                     break
 
@@ -873,8 +922,32 @@ async def async_main() -> int:
 
         await interactive_session()
         return 0
+    except UserQuit:
+        # Any prompt anywhere in the app can raise UserQuit to short-
+        # circuit out cleanly — finally blocks (MCP cleanup, listener
+        # cancellation) still run because we propagate up here instead
+        # of calling sys.exit() in-place.
+        console.print("\n[bold yellow]Exiting...[/bold yellow]")
+        return 0
     except asyncio.CancelledError:
         return 0
+    except Exception as e:
+        # Last-resort safety net: any uncaught exception lands here so
+        # users see a clean Rich-rendered error message instead of a raw
+        # Python traceback dumped to stderr by asyncio. Verbose mode
+        # additionally prints a colourised traceback so a developer can
+        # diagnose without re-running.
+        console.print(f"\n[bold red]Unexpected error:[/bold red] [red]{type(e).__name__}[/red] {e}")
+        if config.VERBOSE:
+            from rich.traceback import Traceback
+
+            console.print(Traceback.from_exception(type(e), e, e.__traceback__))
+        else:
+            console.print(
+                "[dim]Run with VERBOSE=true (or toggle 'v' before the error) "
+                "for a detailed traceback.[/dim]"
+            )
+        return 1
 
 
 def main():

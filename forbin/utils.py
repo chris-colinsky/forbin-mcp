@@ -6,6 +6,12 @@ import select
 from . import config
 
 
+class UserQuit(Exception):
+    """Raised from any prompt to exit the app cleanly. Caught at the top
+    level so finally blocks (MCP session cleanup, listener cancellation)
+    still run."""
+
+
 # Stderr proxy that hides known-noisy MCP library output (e.g. the harmless
 # "Session termination failed: 400" warning) without losing genuine errors.
 class FilteredStderr:

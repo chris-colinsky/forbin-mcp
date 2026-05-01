@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import time
-import traceback
 
 import httpx
 from fastmcp.client import Client
@@ -183,12 +182,6 @@ async def connect_to_mcp_server(
                     else:
                         console.print(f"  [red]{error_name}: {e}[/red]")
 
-                    # Skip the traceback for the noisy expected errors above.
-                    if config.VERBOSE and not (
-                        "BrokenResourceError" in error_name or "ClosedResourceError" in error_name
-                    ):
-                        console.print(f"[dim]{traceback.format_exc()}[/dim]")
-
                 if client:
                     # Best-effort teardown — FastMCP can emit teardown noise
                     # we'd otherwise have to suppress just to retry cleanly.
@@ -279,11 +272,6 @@ async def connect_and_list_tools(
                         console.print("  [yellow]Connection error (server not ready)[/yellow]")
                     else:
                         console.print(f"  [red]{error_name}: {e}[/red]")
-
-                    if config.VERBOSE and not (
-                        "BrokenResourceError" in error_name or "ClosedResourceError" in error_name
-                    ):
-                        console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
                 # Clean up partial connection
                 if client:
