@@ -333,10 +333,20 @@ def confirm_or_edit_config() -> bool:
         display_config_panel()
         verbose_state = "[green]ON[/green]" if config.VERBOSE else "[red]OFF[/red]"
 
+        # Token-but-no-token-needed setups (mock servers, network-gated
+        # internal services) are common, so an empty MCP_TOKEN is just a
+        # heads-up rather than a blocker. Render the hint regardless of
+        # which branch we land in below.
+        if not config.MCP_TOKEN:
+            console.print(
+                "[yellow]No MCP_TOKEN set — connecting without auth. "
+                "Servers that require a bearer token will respond with 401.[/yellow]\n"
+            )
+
         # Branch A: required fields missing — restrict the menu to edit-or-quit
         # so the user can't try to connect with a broken config.
         if not validate_config():
-            console.print("[yellow]MCP_SERVER_URL and MCP_TOKEN are required to connect.[/yellow]")
+            console.print("[yellow]MCP_SERVER_URL is required to connect.[/yellow]")
             console.print()
             display_commands(
                 [
@@ -403,17 +413,14 @@ async def _reconnect_or_warn(
     old_session: MCPSession | None, old_tools: list
 ) -> tuple[MCPSession | None, list]:
     """Reconnect after a profile/environment switch, but only if the new
-    selection has the fields we need. If MCP_SERVER_URL or MCP_TOKEN is
-    missing, print a clear yellow message and keep the previous session
-    instead of dialing into a half-configured profile (which produces a
-    confusing fastmcp traceback). The user can press `c` to fill in the
-    gaps and reconnect manually."""
+    selection has at least the server URL. Without it we'd produce a
+    confusing fastmcp traceback. Keeps the previous session and tells
+    the user to press `c` to fill in the gaps and reconnect manually."""
     if not validate_config():
         console.print(
             f"[yellow]Profile [bold]{config.ACTIVE_PROFILE}/{config.ACTIVE_ENV}[/bold] "
-            f"is missing required fields (MCP_SERVER_URL and/or MCP_TOKEN). "
-            f"Skipping reconnect — press [bold]c[/bold] to fill them in."
-            f"[/yellow]\n"
+            f"is missing MCP_SERVER_URL. Skipping reconnect — "
+            f"press [bold]c[/bold] to set it.[/yellow]\n"
         )
         return old_session, old_tools
     new_session, new_tools = await reconnect(old_session)

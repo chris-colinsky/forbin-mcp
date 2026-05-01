@@ -112,10 +112,15 @@ def is_first_run() -> bool:
 
 
 def validate_config() -> bool:
-    """Validate required configuration. Returns True if valid, False otherwise."""
+    """Validate the minimum required configuration to attempt a connect.
+
+    Only ``MCP_SERVER_URL`` is strictly required — without it there's
+    nothing to connect to. ``MCP_TOKEN`` is optional because plenty of
+    valid setups (local mock servers, network-gated internal services)
+    don't require bearer auth. The gate surfaces a yellow heads-up when
+    the token is empty so users who need auth aren't surprised by a 401.
+    """
     if not MCP_SERVER_URL:
-        return False
-    if not MCP_TOKEN:
         return False
     return True
 
@@ -334,14 +339,12 @@ def run_first_time_setup():
 
     if not env_dict.get("MCP_TOKEN"):
         console.print()
-        console.print("[bold]MCP Token[/bold] [dim](required)[/dim]")
-        console.print("  Bearer token for authentication")
-        while True:
-            token = input("  MCP Token: ").strip()
-            if token:
-                env_dict["MCP_TOKEN"] = token
-                break
-            console.print("  [red]This field is required.[/red]")
+        console.print("[bold]MCP Token[/bold] [dim](optional)[/dim]")
+        console.print("  Bearer token for authentication. Leave blank for unauthenticated servers")
+        console.print("  (e.g. local mocks or network-gated internal services).")
+        token = input("  MCP Token (press Enter to skip): ").strip()
+        if token:
+            env_dict["MCP_TOKEN"] = token
 
     # Health URL is optional — only prompt if the seed didn't supply one.
     if not env_dict.get("MCP_HEALTH_URL"):

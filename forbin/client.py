@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import time
+from typing import Any
 
 import httpx
 from fastmcp.client import Client
@@ -143,14 +144,18 @@ async def connect_to_mcp_server(
                 status.update(f"  [dim]Attempt {attempt}/{max_attempts}...[/dim]")
                 attempt_start = time.monotonic()
 
-                client = Client(
-                    server_url,
-                    auth=BearerAuth(token=token),
-                    init_timeout=30.0,  # Extended timeout for cold starts
+                # Skip BearerAuth entirely for unauthenticated servers — passing
+                # an empty token still adds an `Authorization: Bearer ` header
+                # that some servers reject as malformed.
+                client_kwargs: dict[str, Any] = {
+                    "init_timeout": 30.0,
                     # Configurable so users with long-running tools (agentic
                     # jobs, batch workflows) can extend without code changes.
-                    timeout=config.MCP_TOOL_TIMEOUT,
-                )
+                    "timeout": config.MCP_TOOL_TIMEOUT,
+                }
+                if token:
+                    client_kwargs["auth"] = BearerAuth(token=token)
+                client = Client(server_url, **client_kwargs)
 
                 # Manually enter the async context so we can hold the session
                 # open beyond this function — MCPSession.cleanup() exits it later.
@@ -223,14 +228,18 @@ async def connect_and_list_tools(
                 status.update(f"  [dim]Attempt {attempt}/{max_attempts}...[/dim]")
                 attempt_start = time.monotonic()
 
-                client = Client(
-                    server_url,
-                    auth=BearerAuth(token=token),
-                    init_timeout=30.0,  # Extended timeout for cold starts
+                # Skip BearerAuth entirely for unauthenticated servers — passing
+                # an empty token still adds an `Authorization: Bearer ` header
+                # that some servers reject as malformed.
+                client_kwargs: dict[str, Any] = {
+                    "init_timeout": 30.0,
                     # Configurable so users with long-running tools (agentic
                     # jobs, batch workflows) can extend without code changes.
-                    timeout=config.MCP_TOOL_TIMEOUT,
-                )
+                    "timeout": config.MCP_TOOL_TIMEOUT,
+                }
+                if token:
+                    client_kwargs["auth"] = BearerAuth(token=token)
+                client = Client(server_url, **client_kwargs)
 
                 # Hold the context open — MCPSession.cleanup() exits it later.
                 session = await client.__aenter__()
