@@ -14,6 +14,8 @@
 
 An interactive CLI tool for testing remote MCP (Model Context Protocol) servers and their tools. Specifically designed for developing agentic workflows with support for suspended services (like Fly.io) that need automatic wake-up.
 
+> **Companion project:** Forbin is the **client** half of an MCP development workflow. For local dev and eval harnesses, pair it with [`mock-mcp-server`](https://github.com/chris-colinsky/mock-mcp-server) — a config-driven framework for standing up mock MCP servers from OpenAPI specs. See [Local development with a mock server](#local-development-with-a-mock-server).
+
 ## Name Origin
 
 **Forbin** is named after Dr. Charles Forbin from the 1970 film *Colossus: The Forbin Project*. In the movie, two supercomputers (American "Colossus" and Soviet "Guardian") learn to communicate with each other, establishing their own protocol and sharing information - a perfect parallel to the Model Context Protocol enabling AI systems and tools to communicate seamlessly.
@@ -234,6 +236,25 @@ forbin --profile staging --env eu-west --test
 ```bash
 forbin --help
 ```
+
+### Local development with a mock server
+
+For local iteration without a real backend, pair Forbin with [`mock-mcp-server`](https://github.com/chris-colinsky/mock-mcp-server) — a config-driven framework that stands up an MCP server from an OpenAPI 3.1 spec with `x-mock-*` extensions. Useful for agent eval harnesses, deterministic test data, and offline tool browsing.
+
+Two-step workflow:
+
+```bash
+# 1. In one terminal — start a mock server using a pre-canned config
+git clone https://github.com/chris-colinsky/mock-mcp-server.git
+cd mock-mcp-server
+uv run mock-mcp --config monthly-report
+
+# 2. In another terminal — point Forbin at it
+forbin --config   # set MCP_SERVER_URL=http://localhost:8000/mcp, MCP_TOKEN=anything
+forbin            # browse and exercise the mock tools
+```
+
+Add a `local` environment under your project's profile (via the picker's `n` shortcut) to keep mock-pointing config alongside your prod/preview environments — switch with `p` mid-session.
 
 ## How It Works
 
