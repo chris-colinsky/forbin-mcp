@@ -1,4 +1,4 @@
-<p align="left">
+<p>
   <img src="https://raw.githubusercontent.com/chris-colinsky/forbin-mcp/main/img/forbin_avatar.jpg" alt="Forbin Logo" width="200">
 </p>
 
@@ -13,6 +13,8 @@
 > Inspired by **Colossus: The Forbin Project**, where two computers learn to communicate - just like MCP enables systems to talk to each other.
 
 An interactive CLI tool for testing remote MCP (Model Context Protocol) servers and their tools. Specifically designed for developing agentic workflows with support for suspended services (like Fly.io) that need automatic wake-up.
+
+> **Companion project:** Forbin is the **client** half of an MCP development workflow. For local dev and eval harnesses, pair it with [`mock-mcp-server`](https://github.com/chris-colinsky/mock-mcp-server) — a config-driven framework for standing up mock MCP servers from OpenAPI specs. See [Local development with a mock server](#local-development-with-a-mock-server).
 
 ## Name Origin
 
@@ -106,32 +108,27 @@ For dev dependencies, testing, linting, and pre-commit hooks, see [CONTRIBUTING.
 
 ## Configuration
 
-Forbin reads its settings from environment variables (or a `.env` file) and from `~/.forbin/config.json`. **Environment wins** when both are set. You have two ways to set up:
+Forbin stores its settings in `~/.forbin/profiles.json` — a single document that holds one or more named **profiles**, each containing one or more named **environments**. Each environment carries its own `MCP_SERVER_URL`, `MCP_HEALTH_URL`, and `MCP_TOKEN`. Pick a profile/environment per remote server you test against (e.g. `howl/prod`, `howl/preview`, `internal-api/local`).
 
-**Option 1 — First-run wizard (easiest):** just run `forbin`. If no config exists, you'll be prompted for the required values and they'll be saved to `~/.forbin/config.json`. Re-run anytime with `forbin --config`.
+**Option 1 — First-run wizard (easiest):** just run `forbin`. If no profiles file exists, you'll be prompted for the required values and they'll be saved as the `default/default` profile. Open the in-app editor anytime with `forbin --config`.
 
-**Option 2 — `.env` file (best for CI/CD or scripted setups):**
+**Option 2 — `.env` seed (one-time):** drop a `.env` in your working directory before the very first launch and Forbin imports the values into the default profile:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your MCP server details:
-
 ```env
-# Required: Your MCP server endpoint
 MCP_SERVER_URL=https://your-server.fly.dev/mcp
-
-# Required: Authentication token
 MCP_TOKEN=your-secret-token
-
-# Optional: Health check endpoint. Forbin uses this to verify availability
-# (like an LLM provider's /models) and to wake up suspended services.
-# Leave unset (or remove) to skip the wake-up step entirely.
-MCP_HEALTH_URL=https://your-server.fly.dev/health
+MCP_HEALTH_URL=https://your-server.fly.dev/health   # optional — for wake-up
 ```
 
-For full details on configuration precedence, the JSON config file, and platform-specific examples, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+After the seed, the `.env` is no longer used for connection fields — manage them through `forbin --config` or `p` mid-session. Globals (`VERBOSE`, `MCP_TOOL_TIMEOUT`) still respect `.env` and shell vars.
+
+**Switching servers** — once you have multiple profiles, Forbin shows a picker on launch. Press `p` mid-session to switch and trigger a reconnect. For scripted runs, pin a target with `forbin --profile NAME --env NAME` (does not persist). Single-profile users see no picker.
+
+For full details on the schema, migration from v0.1.4, and platform-specific examples, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ### Configuration Examples
 
@@ -166,31 +163,34 @@ This will:
 5. Enter the two-level interactive browser
 
 **Tool List View:**
-```
+
+```text
 Available Tools
 
    1. generate_report - Generates a monthly summary report...
    2. get_user_stats - Retrieves user statistics for a given...
 
 Commands:
-  number - Select a tool
-  v      - Toggle verbose logging (current: OFF)
-  q      - Quit
-
-Select tool: 1
+  [number] - Select a tool
+  [v]      - Toggle verbose logging (currently: OFF)
+  [c]      - Change configuration
+  [p]      - Switch profile / environment
+  [q]      - Quit
 ```
 
 **Tool View:**
-```
+
+```text
 ─────────────────────────── generate_report ───────────────────────────
 
-Options:
-  d - View details
-  r - Run tool
-  b - Back to tool list
-  q - Quit
-
-Choose option:
+Commands:
+  [d] - View details
+  [r] - Run tool
+  [v] - Toggle verbose logging (currently: OFF)
+  [c] - Change configuration
+  [p] - Switch profile / environment
+  [b] - Back to tool list
+  [q] - Quit
 ```
 
 From the tool view you can:
@@ -217,12 +217,18 @@ This is useful for:
 - Validating authentication tokens
 - CI/CD health checks
 
-### Config Wizard
+### Config Editor
 
-Re-run the first-time setup wizard at any time:
+Open the in-app config editor at any time to edit the active environment, switch profiles, or manage profile/environment CRUD:
 
 ```bash
 forbin --config
+```
+
+Or pin a target for a single invocation (useful in CI):
+
+```bash
+forbin --profile staging --env eu-west --test
 ```
 
 ### Help
@@ -230,6 +236,25 @@ forbin --config
 ```bash
 forbin --help
 ```
+
+### Local development with a mock server
+
+For local iteration without a real backend, pair Forbin with [`mock-mcp-server`](https://github.com/chris-colinsky/mock-mcp-server) — a config-driven framework that stands up an MCP server from an OpenAPI 3.1 spec with `x-mock-*` extensions. Useful for agent eval harnesses, deterministic test data, and offline tool browsing.
+
+Two-step workflow:
+
+```bash
+# 1. In one terminal — start a mock server using a pre-canned config
+git clone https://github.com/chris-colinsky/mock-mcp-server.git
+cd mock-mcp-server
+uv run mock-mcp --config monthly-report
+
+# 2. In another terminal — point Forbin at it
+forbin --config   # set MCP_SERVER_URL=http://localhost:8000/mcp, MCP_TOKEN=anything
+forbin            # browse and exercise the mock tools
+```
+
+Add a `local` environment under your project's profile (via the picker's `n` shortcut) to keep mock-pointing config alongside your prod/preview environments — switch with `p` mid-session.
 
 ## How It Works
 
@@ -262,7 +287,7 @@ While a tool call is in flight, press **`ESC`** to cancel it. You stay in the to
 
 ### Terminal Compatibility
 
-Forbin's single-key shortcuts (`v`, `c`, `ESC`-to-cancel, post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. That has a few practical implications:
+Forbin's single-key shortcuts (`v`, `c`, `p`, `ESC`-to-cancel, post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. That has a few practical implications:
 
 - **macOS and Linux** — fully supported in any modern terminal (Terminal.app, iTerm2, Alacritty, GNOME Terminal, Konsole, etc.).
 - **Native Windows** — `termios` isn't available, so the single-key shortcuts silently no-op. Numbered tool selection, prompts, and tool execution still work, but you won't be able to toggle verbose mid-run, cancel a hanging tool with `ESC`, or use the one-key clipboard prompt. **Run Forbin under [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)** for the full experience.
@@ -273,20 +298,22 @@ Forbin's single-key shortcuts (`v`, `c`, `ESC`-to-cancel, post-call clipboard pr
 
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — full health-URL strategy, timeout knobs, and troubleshooting tables.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — internal package layout, connection lifecycle, and error-handling plumbing.
-- [docs/](docs/) — index of all long-form documentation.
+- [docs/README.md](docs/README.md) — index of all long-form documentation.
 
 ## Development
 
 ### Project Structure
 
-```
+```text
 forbin/
  forbin/              # Package directory
    __init__.py
    __main__.py        # python -m forbin entry point
    cli.py             # Main CLI application
    client.py          # MCP connection + wake-up
-   config.py          # Configuration + first-run wizard
+   config.py          # Module-level globals, env shadowing, legacy migration
+   profiles.py        # profiles.json schema, load/save, profile + env CRUD
+   picker.py          # Profile/environment picker UI
    display.py         # Rich-based UI primitives
    tools.py           # Parameter parsing + tool calls
    utils.py           # FilteredStderr + key listeners
@@ -327,8 +354,11 @@ This tool is designed to work with FastAPI servers using the FastMCP library. Yo
 4. Follow the MCP protocol specification
 
 **Example FastAPI/FastMCP server:**
+
 ```python
+# noinspection PyUnresolvedReferences
 from fastapi import FastAPI
+# noinspection PyUnresolvedReferences
 from fastmcp import FastMCP
 
 app = FastAPI()

@@ -1,6 +1,6 @@
 [project]
 name = "forbin-mcp"
-version = "0.1.4"
+version = "0.1.5"
 description = "Interactive CLI tool for testing remote MCP servers - inspired by Colossus: The Forbin Project, where systems learn to communicate"
 readme = "README.md"
 requires-python = ">=3.13"

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-04-28
+
+### Added
+
+- **Profiles + environments.** Forbin now stores connection details in `~/.forbin/profiles.json`. A profile is a named bundle of named environments (e.g. `staging/us-east`, `staging/eu-west`); each environment carries its own `MCP_SERVER_URL`, `MCP_HEALTH_URL`, and `MCP_TOKEN`. Multi-server users can switch contexts without editing `.env` files.
+- **Profile/environment picker** at launch when more than one profile or environment exists. Single-profile users see no UX change.
+- **`p` shortcut** in the config gate, the main tool list, and the tool view to switch profile or environment mid-session. Triggers a reconnect when the active selection changes.
+- **CRUD for profiles and environments** inside the picker — create, rename, delete from the UI. Refusal logic prevents deleting the only profile or the only environment in a profile.
+- **`--profile NAME --env NAME` flags** for scripted / CI use. The override applies for the lifetime of the process and does not persist as the new active selection. Validation lists available names on typo, and `--profile` without `--env` is required to disambiguate when the chosen profile has multiple environments.
+- **Default values for optional tool parameters.** When a tool's input schema declares a `default` for an optional parameter, Forbin renders it under the description so the user knows what value the server will substitute if they skip the prompt.
+
+### Changed
+
+- **Configuration storage moved** from the flat `~/.forbin/config.json` to `~/.forbin/profiles.json` with a versioned schema. The first launch on v0.1.5 migrates legacy `config.json` into a `default/default` profile and renames the old file to `config.json.bak`. Migration also seeds a default profile from `.env` connection fields when no legacy file exists.
+- **Environment-variable shadowing semantics.** `MCP_SERVER_URL`, `MCP_HEALTH_URL`, and `MCP_TOKEN` from `.env` or the shell are *no longer* used to override the active profile's connection fields — picking a profile means the profile's values are authoritative. Globals (`VERBOSE`, `MCP_TOOL_TIMEOUT`) keep their existing env-shadow precedence. The `(env)` tag in the editor only renders for globals now, and a one-time migration warning surfaces this when the change first applies.
+- **`forbin --config`** opens the in-app editor at the active environment instead of re-running the wizard. Use the picker (`p`) to add fresh profiles; the wizard still runs automatically on a brand-new install.
+- **Startup config panel** shows `Profile:` and `Environment:` rows above the connection details so the active selection is always visible.
+
+### Fixed
+
+- Malformed `profiles.json` is renamed to `profiles.json.malformed.<timestamp>.bak` and replaced with a fresh default doc instead of crashing the CLI. A stale `active` pointer (e.g. from a hand-edit) auto-recovers to the alphabetically-first profile and environment.
+
 ## [0.1.4] - 2026-04-28
 
 ### Security

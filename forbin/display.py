@@ -47,6 +47,8 @@ def display_config_panel():
 
     not_set = "[dim]Not configured[/dim]"
 
+    config_table.add_row("Profile:", config.ACTIVE_PROFILE)
+    config_table.add_row("Environment:", config.ACTIVE_ENV)
     config_table.add_row("Server URL:", config.MCP_SERVER_URL or not_set)
     config_table.add_row("Health URL:", config.MCP_HEALTH_URL or not_set)
 
@@ -171,6 +173,7 @@ def display_tool_menu():
             ("r", "Run tool"),
             ("v", f"Toggle verbose logging (currently: {verbose_state})"),
             ("c", "Change configuration"),
+            ("p", "Switch profile / environment"),
             ("b", "Back to tool list"),
             ("q", "Quit"),
         ]

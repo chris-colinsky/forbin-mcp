@@ -61,20 +61,24 @@ forbin --help
 
 ## Configuration
 
-Settings live in two places:
+Settings live in `~/.forbin/profiles.json`, a single versioned document with three slots:
 
-1. **`.env` file or environment variables** — highest priority.
-2. **`~/.forbin/config.json`** — written by the first-run wizard and the in-app config editor.
+1. **Profiles** — each is a named bundle of named environments. An environment carries the connection triple (`MCP_SERVER_URL`, `MCP_HEALTH_URL`, `MCP_TOKEN`). Multi-server users keep one profile per project; per-project envs (prod/preview/local) live underneath.
+2. **Globals** — `VERBOSE` and `MCP_TOOL_TIMEOUT`. Apply across all profiles.
+3. **Active pointer** — `{profile, environment}` pair selecting which environment supplies the connection fields for the current launch.
 
-Required:
+Picking a profile is authoritative: `.env` and shell env vars do **not** shadow the per-environment fields. Globals (`VERBOSE`, `MCP_TOOL_TIMEOUT`) keep env-shadow semantics — so a one-shot `VERBOSE=true forbin` still works without editing the stored config. The `(env)` tag in the editor renders only for globals.
+
+Required (per environment):
 - `MCP_SERVER_URL` — MCP server endpoint
 - `MCP_TOKEN` — Bearer token for authentication
 
-Optional:
-- `MCP_HEALTH_URL` — Health endpoint for availability check / wake-up
-- `VERBOSE` — `true`/`false` (also persisted when toggled with `v` in the UI)
+Optional (per environment):
+- `MCP_HEALTH_URL` — health endpoint for availability check / wake-up
 
-Precedence is `env > config.json > default`. The config editor flags env-shadowed fields with an `(env)` tag so the user knows their edit won't survive the next launch.
+CLI selection: `forbin --profile NAME --env NAME` pins the active environment for the run without persisting the choice. Mid-session `p` opens the picker. Inside the picker, `n`/`r`/`d` create / rename / delete profiles or environments.
+
+The first launch on v0.1.5 migrates a legacy `~/.forbin/config.json` into a `default/default` profile and renames the old file to `config.json.bak`. A `.env`-only setup seeds the default profile from those vars on first launch.
 
 ## Architecture
 
@@ -86,7 +90,9 @@ forbin/
   __main__.py        # python -m forbin entry point
   cli.py             # Argument dispatch + interactive_session / test_connectivity
   client.py          # MCPSession wrapper, wake_up_server, connect_and_list_tools
-  config.py          # Config load/save, env shadowing, first-run wizard
+  config.py          # Module-level globals, env shadowing, first-run wizard, legacy migration
+  profiles.py        # profiles.json schema, load/save, CRUD for profiles + environments
+  picker.py          # Profile/environment picker UI (also CRUD entry point)
   display.py         # Rich-based UI primitives (panels, step indicators, logo)
   tools.py           # parse/get parameters, call_tool with ESC-cancel + clipboard
   utils.py           # FilteredStderr, verbose-aware logging, key listeners

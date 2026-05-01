@@ -514,3 +514,80 @@ class TestMainFunction:
         ):
             exit_code = await forbin.cli.async_main()
             assert exit_code == 1
+
+
+class TestProfileFlags:
+    """Tests for the --profile / --env CLI flags."""
+
+    @pytest.fixture(autouse=True)
+    def _seeded(self, tmp_path, monkeypatch):
+        """Provide a profiles.json with a multi-env staging profile so the
+        flag-validation tests have something to validate against."""
+        from forbin import profiles, config as cfg
+
+        target = tmp_path / "profiles.json"
+        monkeypatch.setattr(profiles, "PROFILES_FILE", target)
+        monkeypatch.setattr(cfg, "FORBIN_DIR", tmp_path)
+        # Reset any active override left by a previous test.
+        cfg.set_active_override(None, None)
+        doc = profiles.default_profiles_doc()
+        profiles.add_profile(doc, "staging", "us-east")
+        profiles.add_environment(doc, "staging", "eu-west")
+        profiles.save_profiles(doc)
+        yield
+        cfg.set_active_override(None, None)
+
+    @pytest.mark.asyncio
+    async def test_unknown_profile_exits_two(self, capsys):
+        with patch("sys.argv", ["forbin.py", "--profile", "nope", "--test"]):
+            exit_code = await forbin.cli.async_main()
+        assert exit_code == 2
+        captured = capsys.readouterr()
+        assert "Unknown profile" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_profile_with_multi_env_requires_env_flag(self, capsys):
+        with patch("sys.argv", ["forbin.py", "--profile", "staging", "--test"]):
+            exit_code = await forbin.cli.async_main()
+        assert exit_code == 2
+        captured = capsys.readouterr()
+        assert "multiple environments" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_unknown_env_exits_two(self, capsys):
+        with patch(
+            "sys.argv",
+            ["forbin.py", "--profile", "staging", "--env", "nope", "--test"],
+        ):
+            exit_code = await forbin.cli.async_main()
+        assert exit_code == 2
+        captured = capsys.readouterr()
+        assert "Unknown environment" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_env_without_profile_exits_two(self, capsys):
+        with patch("sys.argv", ["forbin.py", "--env", "us-east", "--test"]):
+            exit_code = await forbin.cli.async_main()
+        assert exit_code == 2
+        captured = capsys.readouterr()
+        assert "--env requires --profile" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_valid_flags_set_active_override(self, mock_mcp_client, mock_httpx_client):
+        """Valid flags should pin the override and run --test successfully."""
+        from forbin import config as cfg
+
+        with (
+            patch(
+                "sys.argv",
+                ["forbin.py", "--profile", "staging", "--env", "us-east", "--test"],
+            ),
+            patch("forbin.cli.confirm_or_edit_config", return_value=True),
+            patch("httpx.AsyncClient", return_value=mock_httpx_client),
+            patch("forbin.client.Client", return_value=mock_mcp_client),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            exit_code = await forbin.cli.async_main()
+        assert exit_code == 0
+        assert cfg._OVERRIDE_PROFILE == "staging"
+        assert cfg._OVERRIDE_ENV == "us-east"

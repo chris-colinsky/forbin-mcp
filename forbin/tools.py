@@ -79,6 +79,12 @@ def get_tool_parameters(tool: Any) -> Dict[str, Any]:
         if param_desc:
             console.print(f"  [dim]{param_desc}[/dim]")
 
+        # Show the schema default for optional params so the user knows what the
+        # server will substitute if they skip. Rendered via json.dumps so bools
+        # (true/false), null, and quoted strings all read unambiguously.
+        if not is_required and "default" in param_info:
+            console.print(f"  [dim]Default: {json.dumps(param_info['default'])}[/dim]")
+
         if "enum" in param_info:
             console.print(f"  Allowed values: {', '.join(str(v) for v in param_info['enum'])}")
 
