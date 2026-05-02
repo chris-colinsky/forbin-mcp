@@ -277,12 +277,15 @@ forbin --test                Test connectivity only (exits non-zero on failure)
 forbin --config              Open the in-app config editor
 forbin --profile NAME        Use this profile for the run (does not persist)
 forbin --env NAME            Use this environment in the chosen profile
+                             (requires --profile; required when the profile has >1 env)
 forbin --help                Show help message
 ```
 
 ## Using `--test` in CI/CD
 
 `forbin --test` is designed for non-interactive contexts: it reads the active profile from `~/.forbin/profiles.json` (or whatever you pin via `--profile NAME --env NAME`), runs the same wake-up + connect + list-tools sequence as the interactive mode, and exits with status `0` on success or non-zero on any failure.
+
+> **First-run requirement:** the launch sequence runs the interactive setup wizard if no `profiles.json` exists, which will block on `input()` in CI. Pre-seed by either (a) committing a `profiles.json` to a known location and pointing `FORBIN_PROFILES_FILE` at it, or (b) placing a `.env` with `MCP_SERVER_URL` (and optionally `MCP_TOKEN`, `MCP_HEALTH_URL`) so migration converts it into a `default/default` profile on first launch.
 
 ### GitHub Actions example
 
@@ -324,13 +327,13 @@ jobs:
 
 ## Terminal Compatibility
 
-The single-key shortcuts in the table above (`v`, `c`, `p`, `ESC`, and the post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. Behavior by environment:
+A few shortcuts rely on POSIX `termios`/`tty` to read keypresses without requiring Enter — specifically the background `v` listener (which lets you flip verbose mid-connect or mid-run), `ESC` to cancel an in-flight tool call, and the post-call clipboard prompt. Menu shortcuts like `c` and `p` are read via `Prompt.ask`, so they're line-mode (Enter to submit) and work fine in any environment that supports `input()`. Behavior by environment:
 
 | Environment | Status | Notes |
 |-------------|--------|-------|
 | macOS, Linux (TTY) | Fully supported | All shortcuts work in any modern terminal |
-| Native Windows (cmd / PowerShell) | Degraded | Numbered selection and prompts still work; `v`, `c`, `ESC`, and the clipboard prompt silently no-op. **Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) for the full experience.** |
-| Piped / non-TTY stdin | Degraded | Background `v` listener and post-call clipboard prompt are skipped. Use `forbin --test` for non-interactive contexts. |
+| Native Windows (cmd / PowerShell) | Degraded | Numbered selection, prompts, and menu shortcuts (`c`, `p`) still work; the raw-read shortcuts (`v` listener, `ESC` cancel, clipboard prompt) silently no-op. **Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) for the full experience.** |
+| Piped / non-TTY stdin | Degraded | The background `v` listener, `ESC` cancel, and the post-call clipboard prompt are skipped. Menu shortcuts (`c`, `p`) still work since they're line-mode reads. Use `forbin --test` for non-interactive contexts. |
 
 ### Linux Clipboard
 
