@@ -92,7 +92,7 @@ The `.env` file is loaded from the **current working directory** (or up the dire
 | Setting | Required | Description | Example |
 |---------|----------|-------------|---------|
 | `MCP_SERVER_URL` | yes | Full URL to your MCP server endpoint | `https://my-app.fly.dev/mcp` |
-| `MCP_TOKEN` | yes | Bearer token for authentication | `your-secret-token` |
+| `MCP_TOKEN` | no | Bearer token for authentication. Leave blank for unauthenticated servers (e.g. local mocks, network-gated internal services). | `your-secret-token` |
 | `MCP_HEALTH_URL` | no | Health check endpoint for wake-up | `https://my-app.fly.dev/health` |
 
 These are **not** read from environment variables. Manage them via the in-app editor (`forbin --config`) or the picker.
@@ -280,8 +280,8 @@ For most failures, the fastest diagnostic is **toggling verbose mode with `v`** 
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| Changes to `.env` aren't picked up | Forbin loads `.env` from the **current working directory** (or up the tree). If you `cd`'d elsewhere, it won't see your file. | `cd` into the project directory before running `forbin`, or move settings into `~/.forbin/config.json` via `forbin --config`. |
-| Edited a value in the in-app config editor but it reverts on next launch | Environment variable is shadowing the JSON config (the editor flags this with an `(env)` tag) | Unset the env var or remove the `.env` line. Env always wins on next launch. |
+| Changes to `.env` aren't picked up for connection fields (URL / health / token) | Connection fields come from the active profile in `profiles.json` and ignore env vars by design (picking a profile is authoritative). | Edit the profile via `forbin --config` or the `p` shortcut, or use `forbin --profile NAME --env NAME` for one-shot pinning. |
+| `VERBOSE` or `MCP_TOOL_TIMEOUT` reverts on next launch | Globals still honour env shadowing — an env var or `.env` line wins over the value stored in `profiles.json` (the editor flags this with an `(env)` tag). | Unset the env var or remove the `.env` line if you want the stored value to take effect. |
 | `URL Format` issues | Trailing slash, missing protocol, or wrong path | URLs need protocol, full endpoint path, and no trailing slash: `https://my-app.fly.dev/mcp` ✓, `my-app.fly.dev/mcp` ✗, `https://my-app.fly.dev/mcp/` ✗. |
 | Token rejected after edit in `.env` | Trailing whitespace, surrounding quotes, or shell-expanded characters | No quotes around the value, no trailing whitespace, escape `$` if literal. |
 

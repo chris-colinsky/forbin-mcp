@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CRUD for profiles and environments** inside the picker — create, rename, delete from the UI. Refusal logic prevents deleting the only profile or the only environment in a profile, and rejects names that match menu shortcuts (`n`, `r`, `d`, `b`, `q`).
 - **`--profile NAME --env NAME` flags** for scripted / CI use. The override applies for the lifetime of the process and does not persist as the new active selection. Validation lists available names on typo, and `--profile` without `--env` is required to disambiguate when the chosen profile has multiple environments.
 - **Default values for optional tool parameters.** When a tool's input schema declares a `default` for an optional parameter, Forbin renders it under the description so the user knows what value the server will substitute if they skip the prompt.
-- **Quit-from-anywhere.** Every prompt in the picker, editor, and field sub-menus now accepts `q`; a top-level catch in `async_main` exits cleanly via the new `UserQuit` exception so finally blocks (MCP cleanup, listener cancellation) still run.
-- **Companion-project callout** in the README pointing at [`mock-mcp-server`](https://github.com/chris-colinsky/sandbox-mock-mcp-server) for local-dev pairing, with a two-terminal recipe in Usage.
+- **Quit shortcut in menus.** The picker, editor, and field sub-menus now accept `q` to exit cleanly. Value-entry prompts (e.g. typing a new URL) and the first-run wizard still take input verbatim — `q` there is treated as a literal value, not a shortcut. A top-level catch in `async_main` handles the new `UserQuit` exception so finally blocks (MCP cleanup, listener cancellation) still run when the shortcut fires.
+- **Companion-project callout** in the README pointing at [`mock-mcp-server`](https://github.com/chris-colinsky/mock-mcp-server) for local-dev pairing, with a two-terminal recipe in Usage.
 
 ### Changed
 
