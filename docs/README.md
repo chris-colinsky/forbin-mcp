@@ -5,7 +5,7 @@ This folder contains the long-form documentation for Forbin. For a quick start, 
 ## For Users
 
 - **[INSTALLATION.md](INSTALLATION.md)** — install via Homebrew, pipx, pip, or uv; Windows/WSL notes.
-- **[CONFIGURATION.md](CONFIGURATION.md)** — environment variables and `~/.forbin/config.json`, the health-URL strategy (availability check + wake-up), timeout knobs, and a troubleshooting reference.
+- **[CONFIGURATION.md](CONFIGURATION.md)** — profiles + environments stored in `~/.forbin/profiles.json`, the picker / `p` shortcut, migration from legacy `config.json`, the health-URL strategy (availability check + wake-up), timeout knobs, and a troubleshooting reference.
 - **[USAGE.md](USAGE.md)** — interactive mode, tool browser, keyboard shortcuts, terminal compatibility, and a GitHub Actions CI recipe for `forbin --test`.
 
 ## For Contributors

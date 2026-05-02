@@ -11,7 +11,7 @@ forbin --test
 # Start interactive tool browser
 forbin
 
-# Re-run the first-time setup wizard
+# Open the in-app config editor at the active environment
 forbin --config
 
 # Show help
@@ -51,9 +51,9 @@ Useful for:
 
 `--test` exits with status `0` on success and a non-zero status on failure (failed wake-up, failed connection, or user-cancellation at the config gate), so it's safe to use as a CI step. See [Using `--test` in CI/CD](#using---test-in-cicd) below for a concrete example.
 
-### Config Wizard Mode
+### Config Editor Mode
 
-Re-run the first-time setup wizard to (re)write `~/.forbin/config.json`:
+Open the in-app config editor at the active profile/environment to edit fields, switch profiles, or run profile / environment CRUD:
 
 ```bash
 forbin --config
@@ -272,15 +272,17 @@ Test complete! Server has 3 tools available
 ## Command Line Options
 
 ```
-forbin              Run interactive session
-forbin --test       Test connectivity only
-forbin --config     Re-run the first-time setup wizard
-forbin --help       Show help message
+forbin                       Run interactive session
+forbin --test                Test connectivity only (exits non-zero on failure)
+forbin --config              Open the in-app config editor
+forbin --profile NAME        Use this profile for the run (does not persist)
+forbin --env NAME            Use this environment in the chosen profile
+forbin --help                Show help message
 ```
 
 ## Using `--test` in CI/CD
 
-`forbin --test` is designed for non-interactive contexts: it loads configuration from environment variables, runs the same wake-up + connect + list-tools sequence as the interactive mode, and exits with status `0` on success or non-zero on any failure.
+`forbin --test` is designed for non-interactive contexts: it reads the active profile from `~/.forbin/profiles.json` (or whatever you pin via `--profile NAME --env NAME`), runs the same wake-up + connect + list-tools sequence as the interactive mode, and exits with status `0` on success or non-zero on any failure.
 
 ### GitHub Actions example
 
@@ -322,7 +324,7 @@ jobs:
 
 ## Terminal Compatibility
 
-The single-key shortcuts in the table above (`v`, `c`, `ESC`, and the post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. Behavior by environment:
+The single-key shortcuts in the table above (`v`, `c`, `p`, `ESC`, and the post-call clipboard prompt) rely on POSIX `termios`/`tty` to read keypresses without requiring Enter. Behavior by environment:
 
 | Environment | Status | Notes |
 |-------------|--------|-------|

@@ -97,13 +97,14 @@ The MCP library's logging handlers may hold a reference to the original (unfilte
 
 ## Configuration Resolution (`forbin/config.py`)
 
-Settings are read with priority `env > ~/.forbin/config.json > default` (see [CONFIGURATION.md](CONFIGURATION.md#environment-variables)). The implementation:
+Storage lives in `~/.forbin/profiles.json` (managed by `forbin/profiles.py`) — see [CONFIGURATION.md](CONFIGURATION.md). The resolution layer in `forbin/config.py`:
 
 - `load_dotenv()` runs at module import to populate `os.environ` from `.env` in CWD (or up the tree).
-- `get_setting(key)` checks `os.environ` first, then the JSON file, then returns the default.
-- Module-level `MCP_SERVER_URL`, `MCP_TOKEN`, `MCP_HEALTH_URL`, `VERBOSE` are populated at import.
-- `reload_config()` re-runs `get_setting` for each, used after the in-app config editor saves a change so the new values apply mid-session without a restart.
-- `is_env_shadowed(key)` drives the `(env)` tag in the editor — warns the user that their JSON edit will be invisible on next launch unless they also clear the env var.
+- **Per-environment fields** (`MCP_SERVER_URL`, `MCP_HEALTH_URL`, `MCP_TOKEN`) are read from the active environment in `profiles.json`. Env vars are deliberately ignored here — picking a profile means the profile's values win.
+- **Global fields** (`VERBOSE`, `MCP_TOOL_TIMEOUT`) keep env-shadow semantics: `env > profiles.globals > default`. A one-shot `VERBOSE=true forbin` still works without editing the stored config.
+- `get_setting(key)` dispatches based on which slot the key belongs to (see `PER_ENV_FIELDS` / `GLOBAL_FIELDS` in `profiles.py`).
+- Module-level `MCP_SERVER_URL`, `MCP_TOKEN`, `MCP_HEALTH_URL`, `VERBOSE`, `MCP_TOOL_TIMEOUT`, `ACTIVE_PROFILE`, `ACTIVE_ENV` are populated at import and refreshed by `reload_config()` after the editor or picker writes back.
+- `is_env_shadowed(key)` drives the `(env)` tag in the editor — only ever True for global keys now; per-env fields are never shadowed.
 
 ## Versioning
 
